@@ -577,30 +577,45 @@ function displayTables(){
 }
 
 /* ============ GÉOMÉTRIE DES RAYONS ============ */
+/* ordre des convives autour du cercle : les paires reliées par ❤️ restent
+   collées (côte à côte), côté mariée à droite puis côté marié à gauche */
+function orderedGuests(){
+  const gs = state.guests;
+  if(gs.length===0) return [];
+  const idx={}; gs.forEach((g,i)=>idx[g.id]=i);
+  const parent=gs.map((_,i)=>i);
+  const find=x=>{ while(parent[x]!==x){ parent[x]=parent[parent[x]]; x=parent[x]; } return x; };
+  state.links.filter(l=>l.type==="couple").forEach(l=>{
+    if(idx[l.a]!==undefined && idx[l.b]!==undefined) parent[find(idx[l.a])]=find(idx[l.b]);
+  });
+  const clusters=new Map();
+  gs.forEach((g,i)=>{ const r=find(i); if(!clusters.has(r)) clusters.set(r,[]); clusters.get(r).push(g); });
+  const units=[...clusters.values()];
+  const rank=u=>{
+    const hasB=u.some(g=>g.side==="bride"), hasG=u.some(g=>g.side==="groom");
+    if(hasB && !hasG) return 0;   // mariée → droite
+    if(hasG && !hasB) return 2;   // marié → gauche
+    return 1;                      // paire mixte → entre les deux (bas)
+  };
+  units.sort((a,b)=>rank(a)-rank(b));
+  const out=[]; units.forEach(u=>u.forEach(g=>out.push(g)));
+  return out;
+}
+
 function sideAngles(){
   const map = {};
-  const groom = state.guests.filter(g=>g.side==="groom"); // gauche
-  const bride = state.guests.filter(g=>g.side==="bride"); // droite
-  const coupleN = namedCouple().length;
-
-  /* les mariés trônent au sommet (de part et d'autre du 12 h) */
   if(state.couple.marie.name  && state.couple.marie.name.trim())  map["M"] = -100;
   if(state.couple.mariee.name && state.couple.mariee.name.trim()) map["F"] = -80;
 
-  const N = groom.length + bride.length;
+  const ordered = orderedGuests();
+  const N = ordered.length;
   if(N===0) return map;
 
-  /* balayage horaire depuis le sommet : côté mariée (droite) puis côté marié
-     (gauche), proportionnel au nombre → tout le cercle est utilisé, l'écart
-     se creuse ou se réduit selon le total. Un petit espace est réservé en haut. */
-  const gapTop = coupleN ? 28 : 10;          // degrés réservés près du sommet
-  const start  = -90 + gapTop/2;             // juste à droite du sommet
+  /* balayage horaire depuis le sommet, sur tout le tour ; l'écart = sweep/N */
+  const gapTop = namedCouple().length ? 28 : 10;
+  const start  = -90 + gapTop/2;
   const sweep  = 360 - gapTop;
-  const ordered = [...bride, ...groom];      // droite d'abord (sens horaire)
-  const n = ordered.length;
-  for(let i=0;i<n;i++){
-    map[ordered[i].id] = start + sweep * ((i + 0.5) / n);
-  }
+  for(let i=0;i<N;i++) map[ordered[i].id] = start + sweep * ((i + 0.5) / N);
   return map;
 }
 
@@ -668,19 +683,29 @@ function render(){
 
   /* --- liens entre convives --- */
   const linkGlyph = { lock:"🔒", couple:"❤️", baby:"🍼" };
-  state.links.forEach(l=>{
-    const A=byId(l.a), B=byId(l.b); if(!A||!B) return;
-    const aa=(ang[l.a]||0)*Math.PI/180, ab=(ang[l.b]||0)*Math.PI/180;
+  /* géométrie d'un lien : arc bombé vers l'extérieur (dégage les tables),
+     symbole posé exactement au milieu de la courbe (t=0.5) */
+  function linkGeom(idA, idB){
+    if(ang[idA]===undefined || ang[idB]===undefined) return null;
+    const aa=ang[idA]*Math.PI/180, ab=ang[idB]*Math.PI/180;
     const ax=CX+Rtick*Math.cos(aa), ay=CY+Rtick*Math.sin(aa);
     const bx=CX+Rtick*Math.cos(ab), by=CY+Rtick*Math.sin(ab);
     const mx=(ax+bx)/2, my=(ay+by)/2;
-    const cx2 = CX+(mx-CX)*0.45, cy2 = CY+(my-CY)*0.45; // courbe vers le centre
+    const dl=Math.hypot(mx-CX,my-CY)||1;
+    const chord=Math.hypot(bx-ax,by-ay);
+    const push=Math.min(120, 22 + chord*0.12);          // bombé vers l'extérieur
+    const cx2=mx+(mx-CX)/dl*push, cy2=my+(my-CY)/dl*push;
+    const hx=(ax+2*cx2+bx)/4, hy=(ay+2*cy2+by)/4;        // point de la courbe à t=0.5
+    return { d:`M ${ax} ${ay} Q ${cx2} ${cy2} ${bx} ${by}`, hx, hy };
+  }
+  state.links.forEach(l=>{
+    const geo=linkGeom(l.a,l.b); if(!geo) return;
+    const isHeart = l.type==="couple";
+    const col = isHeart ? "var(--bride)" : "var(--gold-deep)";
     const g = el("g",{ "data-link":l.id, style:"cursor:pointer" });
-    g.appendChild(el("path",{ d:`M ${ax} ${ay} Q ${cx2} ${cy2} ${bx} ${by}`, fill:"none",
-      stroke:"var(--gold-deep)", "stroke-width":1.4, "stroke-opacity":.55 }));
-    const lx = CX+(mx-CX)*0.5, ly = CY+(my-CY)*0.5;
-    g.appendChild(el("circle",{ cx:lx, cy:ly, r:13, fill:"#fff", stroke:"var(--gold)", "stroke-width":1.2 }));
-    g.appendChild(el("text",{ x:lx, y:ly+5, "text-anchor":"middle", "font-size":13 }, linkGlyph[l.type]));
+    g.appendChild(el("path",{ d:geo.d, fill:"none", stroke:col, "stroke-width":1.5, "stroke-opacity":.6 }));
+    g.appendChild(el("circle",{ cx:geo.hx, cy:geo.hy, r:13, fill:"#fff", stroke:col, "stroke-width":1.2 }));
+    g.appendChild(el("text",{ x:geo.hx, y:geo.hy+5, "text-anchor":"middle", "font-size":13 }, linkGlyph[l.type]));
     svg.appendChild(g);
   });
 
@@ -710,9 +735,16 @@ function render(){
     svg.appendChild(grp);
   });
 
-  /* petit cœur au sommet si les deux mariés sont renseignés */
+  /* cœur des mariés, posé sur la ligne qui les relie au sommet */
   if(namedCouple().length===2){
-    svg.appendChild(el("text",{ x:CX, y:CY-Rin-18, "text-anchor":"middle", "font-size":18 }, "❤️"));
+    const geo = linkGeom("M","F");
+    if(geo){
+      const g = el("g",{});
+      g.appendChild(el("path",{ d:geo.d, fill:"none", stroke:"var(--bride)", "stroke-width":1.7, "stroke-opacity":.65 }));
+      g.appendChild(el("circle",{ cx:geo.hx, cy:geo.hy, r:13, fill:"#fff", stroke:"var(--bride)", "stroke-width":1.3 }));
+      g.appendChild(el("text",{ x:geo.hx, y:geo.hy+5, "text-anchor":"middle", "font-size":14 }, "❤️"));
+      svg.appendChild(g);
+    }
   }
 
   document.getElementById("scorebadge").classList.toggle("show", state.tables.length>0);
