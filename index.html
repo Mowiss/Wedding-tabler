@@ -579,18 +579,28 @@ function displayTables(){
 /* ============ GÉOMÉTRIE DES RAYONS ============ */
 function sideAngles(){
   const map = {};
-  const place = (arr,a0,a1)=>{
-    const n=arr.length; if(!n) return;
-    if(n===1){ map[arr[0].id]=(a0+a1)/2; return; }
-    for(let i=0;i<n;i++) map[arr[i].id] = a0 + (a1-a0)*i/(n-1);
-  };
-  const bride = state.guests.filter(g=>g.side==="bride"); // droite
   const groom = state.guests.filter(g=>g.side==="groom"); // gauche
-  place(bride, -70, 76);
-  place(groom, 104, 250);
-  /* les mariés trônent au sommet, de part et d'autre du 12h */
-  if(state.couple.marie.name  && state.couple.marie.name.trim())  map["M"] = -97;
-  if(state.couple.mariee.name && state.couple.mariee.name.trim()) map["F"] = -83;
+  const bride = state.guests.filter(g=>g.side==="bride"); // droite
+  const coupleN = namedCouple().length;
+
+  /* les mariés trônent au sommet (de part et d'autre du 12 h) */
+  if(state.couple.marie.name  && state.couple.marie.name.trim())  map["M"] = -100;
+  if(state.couple.mariee.name && state.couple.mariee.name.trim()) map["F"] = -80;
+
+  const N = groom.length + bride.length;
+  if(N===0) return map;
+
+  /* balayage horaire depuis le sommet : côté mariée (droite) puis côté marié
+     (gauche), proportionnel au nombre → tout le cercle est utilisé, l'écart
+     se creuse ou se réduit selon le total. Un petit espace est réservé en haut. */
+  const gapTop = coupleN ? 28 : 10;          // degrés réservés près du sommet
+  const start  = -90 + gapTop/2;             // juste à droite du sommet
+  const sweep  = 360 - gapTop;
+  const ordered = [...bride, ...groom];      // droite d'abord (sens horaire)
+  const n = ordered.length;
+  for(let i=0;i<n;i++){
+    map[ordered[i].id] = start + sweep * ((i + 0.5) / n);
+  }
   return map;
 }
 
