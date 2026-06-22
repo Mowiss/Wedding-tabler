@@ -1,0 +1,937 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wedding Tabler</title>
+<style>
+  :root{
+    --ivory:#FBF8F3;
+    --ivory-2:#F3EDE2;
+    --ink:#2A2622;
+    --ink-soft:#6B635A;
+    --line:#D9CFBF;
+    --gold:#B89B5E;
+    --gold-deep:#937A40;
+    --groom:#2F6BB5;     /* marié  */
+    --bride:#C75E84;     /* mariée */
+    --kids:#6FA56A;
+    --warn:#B4532E;
+    --shadow:0 8px 30px rgba(42,38,34,.10);
+    --serif:"Hoefler Text","Garamond","Cormorant Garamond",Georgia,"Times New Roman",serif;
+    --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    font-family:var(--sans);color:var(--ink);
+    background:
+      radial-gradient(120% 90% at 50% -10%, #fff 0%, var(--ivory) 55%, var(--ivory-2) 100%);
+    display:flex;flex-direction:column;height:100vh;overflow:hidden;
+  }
+
+  /* ---------- HEADER ---------- */
+  header{
+    flex:0 0 auto;display:flex;align-items:center;gap:18px;flex-wrap:wrap;
+    padding:12px 20px;border-bottom:1px solid var(--line);
+    background:rgba(251,248,243,.86);backdrop-filter:blur(6px);z-index:30;
+  }
+  .brand{display:flex;flex-direction:column;line-height:1;margin-right:6px}
+  .brand b{font-family:var(--serif);font-weight:600;font-size:26px;letter-spacing:.3px}
+  .brand small{color:var(--ink-soft);font-size:11px;letter-spacing:.22em;text-transform:uppercase;margin-top:4px}
+  .sep{width:1px;height:34px;background:var(--line)}
+  .field{display:flex;flex-direction:column;gap:3px}
+  .field label{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-soft)}
+  .field input[type=number]{
+    width:62px;padding:7px 8px;border:1px solid var(--line);border-radius:8px;
+    background:#fff;font:inherit;font-size:14px;color:var(--ink)
+  }
+  .check{display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;font-size:13px}
+  .check input{width:16px;height:16px;accent-color:var(--kids)}
+  .spacer{flex:1 1 auto}
+
+  button{font:inherit;cursor:pointer}
+  .btn{
+    border:1px solid var(--line);background:#fff;color:var(--ink);
+    padding:9px 14px;border-radius:999px;font-size:13px;font-weight:500;
+    transition:.15s;display:inline-flex;align-items:center;gap:7px
+  }
+  .btn:hover{border-color:var(--gold);box-shadow:0 2px 10px rgba(184,155,94,.18)}
+  .btn.ghost{background:transparent}
+  .btn.primary{
+    background:linear-gradient(180deg,var(--gold) 0%,var(--gold-deep) 100%);
+    border-color:var(--gold-deep);color:#fff;font-weight:600;letter-spacing:.04em
+  }
+  .btn.primary:hover{filter:brightness(1.05)}
+
+  .linktool{display:flex;gap:6px;align-items:center;padding:5px 8px;border:1px solid var(--line);border-radius:999px;background:#fff}
+  .linktool .lt{
+    width:34px;height:34px;border-radius:50%;border:1px solid transparent;background:transparent;
+    font-size:17px;line-height:1;display:grid;place-items:center;transition:.15s
+  }
+  .linktool .lt:hover{background:var(--ivory-2)}
+  .linktool .lt.active{border-color:var(--gold);background:#fff;box-shadow:0 0 0 3px rgba(184,155,94,.18)}
+  .lt-label{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-soft);padding-left:4px}
+
+  .icon-btn{width:38px;height:38px;border-radius:50%;border:1px solid var(--line);background:#fff;display:grid;place-items:center;font-size:16px}
+  .icon-btn:hover{border-color:var(--gold)}
+
+  /* ---------- STAGE ---------- */
+  main{flex:1 1 auto;position:relative;overflow:hidden}
+  #stage{width:100%;height:100%;display:block}
+  text{font-family:var(--sans)}
+
+  .banner{
+    position:absolute;top:14px;left:50%;transform:translateX(-50%);
+    background:var(--ink);color:#fff;padding:9px 16px;border-radius:999px;font-size:13px;
+    box-shadow:var(--shadow);z-index:20;display:none;align-items:center;gap:10px
+  }
+  .banner b{font-weight:600}
+  .banner.show{display:flex}
+
+  .legend{
+    position:absolute;left:18px;bottom:16px;background:rgba(255,255,255,.82);
+    border:1px solid var(--line);border-radius:12px;padding:11px 13px;font-size:12px;
+    box-shadow:var(--shadow);z-index:15;backdrop-filter:blur(4px)
+  }
+  .legend .row{display:flex;align-items:center;gap:8px;margin:3px 0}
+  .legend .dot{width:11px;height:11px;border-radius:50%;display:inline-block}
+
+  .scorebadge{
+    position:absolute;right:18px;top:16px;background:rgba(255,255,255,.9);
+    border:1px solid var(--line);border-radius:12px;padding:10px 14px;font-size:12px;
+    box-shadow:var(--shadow);z-index:15;text-align:right;display:none
+  }
+  .scorebadge.show{display:block}
+  .scorebadge b{font-family:var(--serif);font-size:22px;color:var(--gold-deep);display:block;line-height:1.1}
+
+  /* toast */
+  #toast{
+    position:absolute;bottom:18px;left:50%;transform:translateX(-50%) translateY(20px);
+    background:var(--ink);color:#fff;padding:12px 18px;border-radius:12px;max-width:560px;
+    box-shadow:var(--shadow);z-index:40;opacity:0;transition:.25s;pointer-events:none;font-size:13px;line-height:1.5
+  }
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  #toast .wl{color:#F0C98B}
+
+  /* table member panel */
+  #tablepanel{
+    position:absolute;right:18px;bottom:16px;width:240px;background:#fff;border:1px solid var(--line);
+    border-radius:14px;box-shadow:var(--shadow);z-index:25;display:none;overflow:hidden
+  }
+  #tablepanel.show{display:block}
+  #tablepanel h4{margin:0;padding:12px 14px;font-family:var(--serif);font-size:17px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
+  #tablepanel h4 span{font-size:11px;color:var(--ink-soft);font-family:var(--sans)}
+  #tablepanel ul{list-style:none;margin:0;padding:8px 0;max-height:260px;overflow:auto}
+  #tablepanel li{padding:5px 14px;font-size:13px;display:flex;align-items:center;gap:8px}
+  #tablepanel li .pip{width:8px;height:8px;border-radius:50%;flex:0 0 auto}
+  #tablepanel .close{cursor:pointer;color:var(--ink-soft)}
+
+  /* ---------- GUEST GRID OVERLAY ---------- */
+  #guests{
+    position:absolute;inset:0;background:var(--ivory);z-index:50;display:none;flex-direction:column
+  }
+  #guests.show{display:flex}
+  .ghead{
+    display:flex;align-items:center;gap:14px;padding:14px 22px;border-bottom:1px solid var(--line);
+    background:rgba(251,248,243,.9)
+  }
+  .ghead h2{font-family:var(--serif);font-weight:600;margin:0;font-size:24px}
+  .ghead .count{color:var(--ink-soft);font-size:13px}
+  .gwrap{flex:1 1 auto;overflow:auto;padding:18px 22px}
+  table.grid{border-collapse:separate;border-spacing:0;width:100%;min-width:760px;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  table.grid th{
+    font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-soft);
+    text-align:left;padding:11px 12px;border-bottom:1px solid var(--line);background:var(--ivory-2);font-weight:600
+  }
+  table.grid td{padding:6px 8px;border-bottom:1px solid var(--ivory-2);vertical-align:middle}
+  table.grid tr:last-child td{border-bottom:none}
+  table.grid input{width:100%;border:1px solid transparent;background:transparent;padding:7px 8px;border-radius:7px;font:inherit;font-size:13px;color:var(--ink)}
+  table.grid input:hover{border-color:var(--line)}
+  table.grid input:focus{outline:none;border-color:var(--gold);background:#fff;box-shadow:0 0 0 3px rgba(184,155,94,.12)}
+  .age-col input{width:60px}
+  .side-btn{
+    width:42px;height:36px;border-radius:9px;border:1px solid var(--line);background:#fff;font-size:18px;
+    display:grid;place-items:center;transition:.15s
+  }
+  .side-btn[data-side=groom]{box-shadow:inset 0 0 0 2px var(--groom)}
+  .side-btn[data-side=bride]{box-shadow:inset 0 0 0 2px var(--bride)}
+  .row-del{border:none;background:transparent;color:var(--ink-soft);font-size:16px;width:30px;height:30px;border-radius:7px}
+  .row-del:hover{background:#f6e6e0;color:var(--warn)}
+  .gfoot{padding:14px 22px;border-top:1px solid var(--line);display:flex;gap:12px;align-items:center;background:rgba(251,248,243,.9)}
+
+  /* settings drawer */
+  #settings{
+    position:absolute;top:0;right:0;height:100%;width:300px;background:#fff;border-left:1px solid var(--line);
+    box-shadow:var(--shadow);z-index:60;transform:translateX(100%);transition:.25s;display:flex;flex-direction:column
+  }
+  #settings.show{transform:translateX(0)}
+  #settings h3{font-family:var(--serif);margin:0;padding:18px 20px;font-size:20px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
+  #settings .body{padding:18px 20px;overflow:auto}
+  #settings p.hint{font-size:12px;color:var(--ink-soft);line-height:1.5;margin:0 0 18px}
+  .wfield{margin-bottom:16px}
+  .wfield label{display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px}
+  .wfield label b{color:var(--gold-deep)}
+  .wfield input[type=range]{width:100%;accent-color:var(--gold)}
+  .close-x{cursor:pointer;color:var(--ink-soft);font-size:20px;line-height:1}
+
+  @media (max-width:880px){
+    .brand small{display:none}
+    .legend{display:none}
+  }
+
+  /* ---------- DOCUMENT D'IMPRESSION ---------- */
+  #printDoc{
+    display:none;color:#111;font-family:var(--sans);
+    -webkit-print-color-adjust:exact;print-color-adjust:exact
+  }
+  #printDoc .pd-head{text-align:center;margin-bottom:9mm}
+  #printDoc .pd-head h1{font-family:var(--serif);font-size:30pt;margin:0;font-weight:600}
+  #printDoc .pd-head .pd-sub{font-size:9.5pt;color:#555;letter-spacing:.18em;text-transform:uppercase;margin-top:3mm}
+  #printDoc .pd-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:6mm}
+  #printDoc .pd-card{border:1px solid #c2b79f;border-radius:3mm;padding:5mm 6mm;break-inside:avoid;page-break-inside:avoid}
+  #printDoc .pd-card h2{font-family:var(--serif);font-size:15pt;margin:0 0 3mm;display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px solid #ddd;padding-bottom:2mm;font-weight:600}
+  #printDoc .pd-card h2 span{font-size:9.5pt;color:#999;font-family:var(--sans);font-weight:400}
+  #printDoc .pd-card ol{margin:0;padding-left:7mm;font-size:11pt;line-height:1.75}
+  #printDoc .pd-card li em{color:#777;font-style:normal;font-size:9.5pt}
+  #printDoc .pd-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:middle}
+  #printDoc .pd-dot.groom{background:#2F6BB5}
+  #printDoc .pd-dot.bride{background:#C75E84}
+  #printDoc .pd-kids h2{color:#4f7d4a}
+  #printDoc .pd-un{grid-column:1 / -1;border-color:#B4532E}
+  #printDoc .pd-un h2{color:#B4532E}
+  #printDoc .pd-empty{color:#bbb;list-style:none;margin-left:-7mm}
+  @media print{
+    header,main,#toast,#settings,#guests{display:none !important}
+    #printDoc{display:block !important}
+    @page{margin:12mm}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand"><b>Wedding&nbsp;Tabler</b><small>Plan de table optimisé</small></div>
+  <div class="sep"></div>
+
+  <div class="field">
+    <label>Tables</label>
+    <input id="cfgTables" type="number" min="1" max="40" value="6">
+  </div>
+  <div class="field">
+    <label>Places / table</label>
+    <input id="cfgSeats" type="number" min="2" max="20" value="8">
+  </div>
+  <label class="check"><input id="cfgKids" type="checkbox"> Table d'enfant <small style="color:var(--ink-soft)">(&lt;15 ans)</small></label>
+
+  <div class="sep"></div>
+
+  <button class="btn ghost" id="openGuests">👥&nbsp;Ajouter des convives</button>
+
+  <div class="linktool" title="Outil de lien : choisir un type puis cliquer deux convives">
+    <span class="lt-label">Lier</span>
+    <button class="lt" data-link="lock"   title="Même table (obligatoire)">🔒</button>
+    <button class="lt" data-link="couple" title="Couple → même table">❤️</button>
+    <button class="lt" data-link="baby"   title="Même table sauf si table d'enfant">🍼</button>
+  </div>
+
+  <div class="spacer"></div>
+
+  <button class="btn ghost" id="saveBtn" title="Exporter le projet en JSON">💾&nbsp;Save</button>
+  <button class="btn ghost" id="loadBtn" title="Importer un projet JSON">📂&nbsp;Load</button>
+  <button class="btn ghost" id="printBtn" title="Imprimer / Enregistrer en PDF">🖨️&nbsp;Print</button>
+  <input type="file" id="loadFile" accept="application/json,.json" style="display:none">
+  <div class="sep"></div>
+
+  <button class="icon-btn" id="openSettings" title="Réglages d'affinité">⚙️</button>
+  <button class="icon-btn" id="resetAll" title="Tout réinitialiser">🗑️</button>
+  <button class="btn primary" id="seatBtn">À&nbsp;TABLE&nbsp;!</button>
+</header>
+
+<main>
+  <svg id="stage" viewBox="0 0 1200 1200" preserveAspectRatio="xMidYMid meet"></svg>
+
+  <div class="banner" id="banner"></div>
+
+  <div class="scorebadge" id="scorebadge"><small>Affinité totale</small><b id="scoreVal">0</b></div>
+
+  <div class="legend">
+    <div class="row"><span class="dot" style="background:var(--groom)"></span> Côté marié 🤵🏻‍♂️</div>
+    <div class="row"><span class="dot" style="background:var(--bride)"></span> Côté mariée 👰🏻‍♀️</div>
+    <div class="row"><span class="dot" style="background:var(--kids)"></span> Enfants 🍼</div>
+    <div class="row" style="margin-top:6px;color:var(--ink-soft);font-size:11px">🔒 obligatoire · ❤️ couple · 🍼 enfant</div>
+  </div>
+
+  <div id="tablepanel">
+    <h4><span id="tpTitle">Table</span><span class="close" id="tpClose">✕</span></h4>
+    <ul id="tpList"></ul>
+  </div>
+
+  <!-- GUEST GRID -->
+  <section id="guests">
+    <div class="ghead">
+      <h2>Convives</h2>
+      <span class="count" id="gCount"></span>
+      <div class="spacer"></div>
+      <button class="btn" id="addRow">＋ Ajouter une ligne</button>
+      <button class="btn primary" id="closeGuests">Retour au plan</button>
+    </div>
+    <div class="gwrap">
+      <table class="grid">
+        <thead>
+          <tr>
+            <th>Côté</th><th>Nom Prénom</th><th>Âge</th><th>Métier</th>
+            <th>Hobby 1</th><th>Hobby 2</th><th>Hobby 3</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="gridBody"></tbody>
+      </table>
+      <datalist id="dl-jobs"></datalist>
+      <datalist id="dl-hobbies"></datalist>
+    </div>
+    <div class="gfoot">
+      <span style="font-size:12px;color:var(--ink-soft)">Astuce : les métiers et hobbies déjà saisis sont reproposés automatiquement.</span>
+    </div>
+  </section>
+
+  <!-- SETTINGS -->
+  <aside id="settings">
+    <h3>Affinités <span class="close-x" id="closeSettings">✕</span></h3>
+    <div class="body">
+      <p class="hint">Plus un critère pèse, plus l'algorithme cherchera à réunir les convives qui le partagent. L'écart d'âge important applique une pénalité. Le côté marié/mariée n'influence pas le placement.</p>
+      <div class="wfield"><label>Même métier <b id="wjobV">+3</b></label><input type="range" id="wjob" min="0" max="8" step="1" value="3"></div>
+      <div class="wfield"><label>Hobby partagé (par hobby) <b id="whobV">+2</b></label><input type="range" id="whob" min="0" max="6" step="1" value="2"></div>
+      <div class="wfield"><label>Âge proche (≤3 ans) <b id="wacV">+2</b></label><input type="range" id="wac" min="0" max="6" step="1" value="2"></div>
+      <div class="wfield"><label>Âge voisin (≤7 ans) <b id="wamV">+1</b></label><input type="range" id="wam" min="0" max="5" step="1" value="1"></div>
+      <div class="wfield"><label>Pénalité grand écart (&gt;15 ans) <b id="wafV">−1</b></label><input type="range" id="waf" min="-4" max="0" step="1" value="-1"></div>
+    </div>
+  </aside>
+</main>
+
+<div id="toast"></div>
+<div id="printDoc"></div>
+
+<script>
+"use strict";
+
+/* ============ ÉTAT ============ */
+const LS_KEY = "wedding-tabler-v1";
+let state = {
+  config:  { tables:6, seats:8, kids:false },
+  guests:  [],          // {id, side, name, age|null, job, h1, h2, h3}
+  links:   [],          // {id, a, b, type:'lock'|'couple'|'baby'}
+  weights: { job:3, hobby:2, ageClose:2, ageMid:1, ageFar:-1 },
+  assignment:{},        // guestId -> tableId
+  tables:  []           // [{id,label,isKids,capacity,members:[guestId]}]
+};
+let uid = 1;
+const newId = () => "g"+(uid++);
+
+/* link tool runtime */
+let linkMode = null;     // 'lock'|'couple'|'baby'|null
+let linkFirst = null;    // first selected guest id
+
+/* ============ PERSISTANCE ============ */
+function save(){
+  try{ localStorage.setItem(LS_KEY, JSON.stringify({state,uid})); }catch(e){}
+}
+function load(){
+  try{
+    const raw = localStorage.getItem(LS_KEY);
+    if(!raw) return false;
+    const o = JSON.parse(raw);
+    if(o && o.state){ state = o.state; uid = o.uid||1;
+      state.assignment = state.assignment||{}; state.tables = state.tables||[];
+      return true; }
+  }catch(e){}
+  return false;
+}
+
+/* ============ UTILITAIRES ============ */
+const norm = s => (s||"").trim().toLowerCase();
+const byId = id => state.guests.find(g=>g.id===id);
+const CX = 600, CY = 600;
+
+function toast(msg, warns){
+  const t = document.getElementById("toast");
+  let html = msg;
+  if(warns && warns.length){
+    html += "<br>" + warns.map(w=>'<span class="wl">⚠ '+w+'</span>').join("<br>");
+  }
+  t.innerHTML = html;
+  t.classList.add("show");
+  clearTimeout(toast._t);
+  toast._t = setTimeout(()=>t.classList.remove("show"), warns&&warns.length?7000:3500);
+}
+
+/* ============ AFFINITÉ ============ */
+function aff(a,b){
+  const W = state.weights; let s = 0;
+  if(a.job && b.job && norm(a.job)===norm(b.job)) s += W.job;
+  const hb = new Set([b.h1,b.h2,b.h3].filter(Boolean).map(norm));
+  [a.h1,a.h2,a.h3].filter(Boolean).map(norm).forEach(h=>{ if(hb.has(h)) s += W.hobby; });
+  if(a.age!=null && b.age!=null){
+    const d = Math.abs(a.age-b.age);
+    if(d<=3) s += W.ageClose; else if(d<=7) s += W.ageMid; else if(d>15) s += W.ageFar;
+  }
+  return s;
+}
+function tablesScore(tables){
+  let s=0;
+  for(const t of tables) for(let i=0;i<t.length;i++) for(let j=i+1;j<t.length;j++) s+=aff(t[i],t[j]);
+  return s;
+}
+
+/* ============ GROUPES LIÉS (union-find) ============ */
+function buildGroups(pool, links, includeBaby){
+  const idx = {}; pool.forEach((g,i)=>idx[g.id]=i);
+  const parent = pool.map((_,i)=>i);
+  const find = x => { while(parent[x]!==x){ parent[x]=parent[parent[x]]; x=parent[x]; } return x; };
+  const uni  = (a,b) => { parent[find(a)] = find(b); };
+  links.forEach(l=>{
+    if(idx[l.a]===undefined || idx[l.b]===undefined) return;
+    if(l.type==="lock" || l.type==="couple") uni(idx[l.a], idx[l.b]);
+    else if(l.type==="baby" && includeBaby)   uni(idx[l.a], idx[l.b]);
+  });
+  const groups = {};
+  pool.forEach((g,i)=>{ const r=find(i); (groups[r]=groups[r]||[]).push(g); });
+  return Object.values(groups);
+}
+
+/* ============ PLACEMENT D'UN POOL ============ */
+function seatPool(pool, links, includeBaby, nTables, seats){
+  const groups = buildGroups(pool, links, includeBaby);
+  const tables = Array.from({length:nTables}, ()=>[]);
+  const unseated = [], oversized = [];
+  const movable = new Set();
+  groups.forEach(g=>{ if(g.length===1) movable.add(g[0].id); });
+
+  groups.sort((a,b)=>b.length-a.length);
+
+  const gain = (group, table)=>{ let g=0; for(const x of group) for(const y of table) g+=aff(x,y); return g; };
+
+  for(const group of groups){
+    if(group.length>seats){ oversized.push(group); unseated.push(...group); continue; }
+    let best=-1, bestG=-Infinity;
+    for(let t=0;t<nTables;t++){
+      if(tables[t].length+group.length<=seats){
+        const g = gain(group, tables[t]);
+        if(g>bestG){ bestG=g; best=t; }
+      }
+    }
+    if(best<0) unseated.push(...group);
+    else tables[best].push(...group);
+  }
+
+  /* recherche locale : déplacements / échanges de convives non liés */
+  let cur = tablesScore(tables), improved = true, guard = 0;
+  while(improved && guard++<80){
+    improved = false;
+    for(let a=0;a<tables.length;a++){
+      for(let b=0;b<tables.length;b++){
+        if(a===b) continue;
+        for(let i=0;i<tables[a].length;i++){
+          const ga = tables[a][i];
+          if(!movable.has(ga.id)) continue;
+          if(tables[b].length<seats){                 // déplacement simple
+            tables[b].push(ga); tables[a].splice(i,1);
+            const ns = tablesScore(tables);
+            if(ns>cur+1e-9){ cur=ns; improved=true; i--; continue; }
+            tables[a].splice(i,0,ga); tables[b].pop();
+          }
+          for(let j=0;j<tables[b].length;j++){        // échange
+            const gb = tables[b][j];
+            if(!movable.has(gb.id)) continue;
+            tables[a][i]=gb; tables[b][j]=ga;
+            const ns = tablesScore(tables);
+            if(ns>cur+1e-9){ cur=ns; improved=true; }
+            else { tables[a][i]=ga; tables[b][j]=gb; }
+          }
+        }
+      }
+    }
+  }
+  return { tables, unseated, oversized };
+}
+
+/* ============ OPTIMISATION GLOBALE ============ */
+function optimize(){
+  syncConfig();
+  if(state.guests.length===0){ toast("Aucun convive à placer."); return; }
+  const { tables:T, seats:S, kids:kidsMode } = state.config;
+  const warnings = [];
+
+  let adultPool, kidPool = [];
+  if(kidsMode){
+    kidPool   = state.guests.filter(g=>g.age!=null && g.age<15);
+    adultPool = state.guests.filter(g=>!(g.age!=null && g.age<15));
+  } else {
+    adultPool = state.guests.slice();
+  }
+
+  if(adultPool.length > T*S){
+    warnings.push(`${adultPool.length} adultes pour ${T*S} places : il manque ${adultPool.length-T*S} place(s).`);
+  }
+
+  const adultRes = seatPool(adultPool, state.links, !kidsMode, T, S);
+
+  let kidRes = null, nKid = 0;
+  if(kidsMode && kidPool.length){
+    nKid = Math.max(1, Math.ceil(kidPool.length/S));
+    if(nKid>1) warnings.push(`${kidPool.length} enfants : ${nKid} tables enfant créées (une seule ne suffit pas).`);
+    kidRes = seatPool(kidPool, [], false, nKid, S);
+  }
+
+  /* reconstruire les tables + assignation */
+  state.tables = []; state.assignment = {};
+  adultRes.tables.forEach((mem,i)=>{
+    const id = "T"+(i+1);
+    state.tables.push({ id, label:"Table "+(i+1), isKids:false, capacity:S, members:mem.map(g=>g.id) });
+    mem.forEach(g=>state.assignment[g.id]=id);
+  });
+  if(kidRes){
+    kidRes.tables.forEach((mem,i)=>{
+      const id = "K"+(i+1);
+      state.tables.push({ id, label: nKid>1?("Enfants "+(i+1)):"Enfants", isKids:true, capacity:S, members:mem.map(g=>g.id) });
+      mem.forEach(g=>state.assignment[g.id]=id);
+    });
+  }
+
+  const unseated = [...adultRes.unseated, ...(kidRes?kidRes.unseated:[])];
+  adultRes.oversized.forEach(g=>warnings.push(`Groupe lié de ${g.length} pers. > ${S} places : impossible sur une table.`));
+  const reallyUnseated = unseated.filter(g=>!state.assignment[g.id]);
+  if(reallyUnseated.length) warnings.push(`${reallyUnseated.length} convive(s) non placé(s) : faute de place.`);
+
+  const score = tablesScore([...adultRes.tables, ...(kidRes?kidRes.tables:[])]);
+  document.getElementById("scoreVal").textContent = score;
+  document.getElementById("scorebadge").classList.add("show");
+
+  hideTablePanel();
+  render();
+  save();
+  toast(`Plan généré · ${state.tables.length} tables · affinité ${score}.`, warnings);
+}
+
+/* ============ TABLES POUR L'AFFICHAGE ============ */
+function displayTables(){
+  if(state.tables.length) return state.tables;
+  const { tables:T, kids:kidsMode } = state.config, arr=[];
+  for(let i=0;i<T;i++) arr.push({ id:"T"+(i+1), label:"Table "+(i+1), isKids:false, capacity:state.config.seats, members:[] });
+  if(kidsMode) arr.push({ id:"K1", label:"Enfants", isKids:true, capacity:state.config.seats, members:[] });
+  return arr;
+}
+
+/* ============ GÉOMÉTRIE DES RAYONS ============ */
+function sideAngles(){
+  const map = {};
+  const place = (arr,a0,a1)=>{
+    const n=arr.length; if(!n) return;
+    if(n===1){ map[arr[0].id]=(a0+a1)/2; return; }
+    for(let i=0;i<n;i++) map[arr[i].id] = a0 + (a1-a0)*i/(n-1);
+  };
+  const bride = state.guests.filter(g=>g.side==="bride"); // droite
+  const groom = state.guests.filter(g=>g.side==="groom"); // gauche
+  place(bride, -76, 76);
+  place(groom, 104, 256);
+  return map;
+}
+
+/* ============ RENDU ============ */
+const NS = "http://www.w3.org/2000/svg";
+function el(tag, attrs, text){
+  const e = document.createElementNS(NS, tag);
+  for(const k in attrs) e.setAttribute(k, attrs[k]);
+  if(text!=null) e.textContent = text;
+  return e;
+}
+
+function render(){
+  const svg = document.getElementById("stage");
+  svg.innerHTML = "";
+  const tables = displayTables();
+  const ang = sideAngles();
+
+  /* positions des tables sur un anneau central */
+  const n = tables.length;
+  const RT = n<=1 ? 0 : Math.min(200, 70 + n*16);
+  const pos = {};
+  tables.forEach((t,i)=>{
+    if(n===1){ pos[t.id]={x:CX,y:CY}; }
+    else { const a=(-90 + i*360/n)*Math.PI/180; pos[t.id]={ x:CX+RT*Math.cos(a), y:CY+RT*Math.sin(a) }; }
+  });
+
+  const Rin = 350, Rtick = 420, Rlbl = 432;
+
+  /* --- lignes d'assignation (sous les rayons) --- */
+  const gAssign = el("g",{});
+  state.guests.forEach(g=>{
+    const tid = state.assignment[g.id]; if(!tid || !pos[tid]) return;
+    const a = (ang[g.id]||0)*Math.PI/180;
+    const sx = CX+Rin*Math.cos(a), sy = CY+Rin*Math.sin(a);
+    const col = g.side==="bride" ? "var(--bride)" : "var(--groom)";
+    gAssign.appendChild(el("line",{ x1:sx,y1:sy, x2:pos[tid].x, y2:pos[tid].y,
+      stroke:col, "stroke-width":1, "stroke-opacity":.22, "data-line-guest":g.id }));
+  });
+  svg.appendChild(gAssign);
+
+  /* --- tables --- */
+  tables.forEach(t=>{
+    const p = pos[t.id];
+    const rTable = Math.max(30, 18 + state.config.seats*2.2);
+    const g = el("g",{ "data-table":t.id, style:"cursor:pointer" });
+    const ring = t.isKids ? "var(--kids)" : "var(--gold)";
+    /* sièges */
+    const seats = t.capacity;
+    for(let s=0;s<seats;s++){
+      const sa = (s/seats)*2*Math.PI - Math.PI/2;
+      const filled = s < t.members.length;
+      g.appendChild(el("circle",{ cx:p.x+(rTable+9)*Math.cos(sa), cy:p.y+(rTable+9)*Math.sin(sa),
+        r:4.5, fill: filled?ring:"#fff", stroke:ring, "stroke-width":1.2, "stroke-opacity":.7 }));
+    }
+    g.appendChild(el("circle",{ cx:p.x, cy:p.y, r:rTable, fill:"#fff", stroke:ring, "stroke-width":1.6 }));
+    g.appendChild(el("circle",{ cx:p.x, cy:p.y, r:rTable-7, fill:"none", stroke:ring, "stroke-width":.8, "stroke-opacity":.4 }));
+    const tl = el("text",{ x:p.x, y:p.y-2, "text-anchor":"middle", "font-family":"var(--serif)",
+      "font-size":Math.max(14,rTable*0.42), fill:"var(--ink)" }, t.isKids?"🍼":t.label.replace("Table ","T"));
+    g.appendChild(tl);
+    g.appendChild(el("text",{ x:p.x, y:p.y+rTable*0.5, "text-anchor":"middle", "font-size":11,
+      fill:"var(--ink-soft)" }, t.members.length+"/"+t.capacity));
+    svg.appendChild(g);
+  });
+
+  /* --- liens entre convives --- */
+  const linkGlyph = { lock:"🔒", couple:"❤️", baby:"🍼" };
+  state.links.forEach(l=>{
+    const A=byId(l.a), B=byId(l.b); if(!A||!B) return;
+    const aa=(ang[l.a]||0)*Math.PI/180, ab=(ang[l.b]||0)*Math.PI/180;
+    const ax=CX+Rtick*Math.cos(aa), ay=CY+Rtick*Math.sin(aa);
+    const bx=CX+Rtick*Math.cos(ab), by=CY+Rtick*Math.sin(ab);
+    const mx=(ax+bx)/2, my=(ay+by)/2;
+    const cx2 = CX+(mx-CX)*0.45, cy2 = CY+(my-CY)*0.45; // courbe vers le centre
+    const g = el("g",{ "data-link":l.id, style:"cursor:pointer" });
+    g.appendChild(el("path",{ d:`M ${ax} ${ay} Q ${cx2} ${cy2} ${bx} ${by}`, fill:"none",
+      stroke:"var(--gold-deep)", "stroke-width":1.4, "stroke-opacity":.55 }));
+    const lx = CX+(mx-CX)*0.5, ly = CY+(my-CY)*0.5;
+    g.appendChild(el("circle",{ cx:lx, cy:ly, r:13, fill:"#fff", stroke:"var(--gold)", "stroke-width":1.2 }));
+    g.appendChild(el("text",{ x:lx, y:ly+5, "text-anchor":"middle", "font-size":13 }, linkGlyph[l.type]));
+    svg.appendChild(g);
+  });
+
+  /* --- rayons / convives --- */
+  state.guests.forEach(g=>{
+    const a = (ang[g.id]||0)*Math.PI/180;
+    const col = g.side==="bride" ? "var(--bride)" : "var(--groom)";
+    const ix=CX+Rin*Math.cos(a), iy=CY+Rin*Math.sin(a);
+    const tx=CX+Rtick*Math.cos(a), ty=CY+Rtick*Math.sin(a);
+    const lx=CX+Rlbl*Math.cos(a), ly=CY+Rlbl*Math.sin(a);
+    let rot = (ang[g.id]||0), anchor="start";
+    if(Math.cos(a)<0){ rot += 180; anchor="end"; }
+    const selected = linkFirst===g.id;
+    const grp = el("g",{ "data-guest":g.id, style:"cursor:pointer" });
+    grp.appendChild(el("line",{ x1:ix,y1:iy,x2:tx,y2:ty, stroke:col, "stroke-width":selected?3:1.6, "stroke-opacity":selected?1:.8 }));
+    grp.appendChild(el("circle",{ cx:tx, cy:ty, r:selected?5:3.4, fill:col }));
+    const label = (g.name && g.name.trim()) ? g.name.trim() : "(sans nom)";
+    const txt = el("text",{ x:lx, y:ly, "text-anchor":anchor, transform:`rotate(${rot} ${lx} ${ly})`,
+      "font-size":14, fill:col, "font-weight":selected?700:500, "dominant-baseline":"middle" }, label);
+    grp.appendChild(txt);
+    svg.appendChild(grp);
+  });
+
+  document.getElementById("scorebadge").classList.toggle("show", state.tables.length>0);
+}
+
+/* ============ INTERACTIONS STAGE ============ */
+document.getElementById("stage").addEventListener("click", e=>{
+  const gEl = e.target.closest("[data-guest]");
+  const lEl = e.target.closest("[data-link]");
+  const tEl = e.target.closest("[data-table]");
+
+  if(linkMode && gEl){
+    const id = gEl.getAttribute("data-guest");
+    if(linkFirst===null){ linkFirst=id; render(); return; }
+    if(linkFirst===id){ linkFirst=null; render(); return; }
+    createLink(linkFirst, id, linkMode);
+    linkFirst=null; render(); return;
+  }
+  if(lEl){
+    const id = lEl.getAttribute("data-link");
+    state.links = state.links.filter(l=>l.id!==id);
+    save(); render(); toast("Lien supprimé."); return;
+  }
+  if(tEl){ showTablePanel(tEl.getAttribute("data-table")); return; }
+  hideTablePanel();
+});
+
+function createLink(a,b,type){
+  if(a===b) return;
+  const exists = state.links.some(l=>(l.a===a&&l.b===b)||(l.a===b&&l.b===a));
+  if(exists){ toast("Ces deux convives sont déjà liés."); return; }
+  state.links.push({ id:"l"+(uid++), a, b, type });
+  save();
+  const names = (byId(a)?.name||"?")+" ↔ "+(byId(b)?.name||"?");
+  toast("Lien créé : "+names);
+}
+
+/* panneau membres d'une table */
+function showTablePanel(tid){
+  const t = displayTables().find(x=>x.id===tid); if(!t) return;
+  const panel=document.getElementById("tablepanel");
+  document.getElementById("tpTitle").textContent = t.isKids?"🍼 "+t.label:t.label;
+  const ul=document.getElementById("tpList"); ul.innerHTML="";
+  if(t.members.length===0){
+    const li=document.createElement("li"); li.style.color="var(--ink-soft)";
+    li.textContent="Aucun convive — cliquez sur « À TABLE ! »."; ul.appendChild(li);
+  } else {
+    t.members.forEach(mid=>{
+      const g=byId(mid); if(!g) return;
+      const li=document.createElement("li");
+      const pip=document.createElement("span"); pip.className="pip";
+      pip.style.background = g.side==="bride"?"var(--bride)":"var(--groom)";
+      li.appendChild(pip);
+      li.appendChild(document.createTextNode((g.name||"(sans nom)")+(g.age!=null?" · "+g.age+" ans":"")));
+      ul.appendChild(li);
+    });
+  }
+  panel.classList.add("show");
+}
+function hideTablePanel(){ document.getElementById("tablepanel").classList.remove("show"); }
+document.getElementById("tpClose").addEventListener("click", hideTablePanel);
+
+/* ============ OUTIL DE LIEN (header) ============ */
+document.querySelectorAll(".linktool .lt").forEach(b=>{
+  b.addEventListener("click", ()=>{
+    const type = b.getAttribute("data-link");
+    if(linkMode===type){ linkMode=null; linkFirst=null; }
+    else { linkMode=type; linkFirst=null; }
+    document.querySelectorAll(".linktool .lt").forEach(x=>x.classList.toggle("active", x.getAttribute("data-link")===linkMode));
+    const banner=document.getElementById("banner");
+    const lbl={lock:"🔒 même table obligatoire",couple:"❤️ couple",baby:"🍼 même table sauf table d'enfant"};
+    if(linkMode){ banner.innerHTML="<b>Mode lien — "+lbl[linkMode]+"</b> · cliquez deux convives"; banner.classList.add("show"); }
+    else banner.classList.remove("show");
+    render();
+  });
+});
+
+/* ============ CONFIG HEADER ============ */
+function syncConfig(){
+  state.config.tables = clampInt(document.getElementById("cfgTables").value,1,40,6);
+  state.config.seats  = clampInt(document.getElementById("cfgSeats").value,2,20,8);
+  state.config.kids   = document.getElementById("cfgKids").checked;
+}
+function clampInt(v,min,max,def){ v=parseInt(v,10); if(isNaN(v))return def; return Math.max(min,Math.min(max,v)); }
+
+["cfgTables","cfgSeats","cfgKids"].forEach(id=>{
+  document.getElementById(id).addEventListener("change", ()=>{
+    syncConfig();
+    state.tables=[]; state.assignment={};   // la config a changé → plan obsolète
+    document.getElementById("scorebadge").classList.remove("show");
+    save(); render();
+  });
+});
+
+/* ============ GRILLE CONVIVES ============ */
+function openGuests(){ document.getElementById("guests").classList.add("show"); renderGrid(); }
+function closeGuests(){ document.getElementById("guests").classList.remove("show"); render(); }
+document.getElementById("openGuests").addEventListener("click", openGuests);
+document.getElementById("closeGuests").addEventListener("click", closeGuests);
+
+document.getElementById("addRow").addEventListener("click", ()=>{
+  state.guests.push({ id:newId(), side:"groom", name:"", age:null, job:"", h1:"", h2:"", h3:"" });
+  save(); renderGrid();
+  const body=document.getElementById("gridBody");
+  body.lastElementChild?.querySelector('input[data-f=name]')?.focus();
+});
+
+function refreshDatalists(){
+  const jobs=new Set(), hob=new Set();
+  state.guests.forEach(g=>{
+    if(g.job&&g.job.trim()) jobs.add(g.job.trim());
+    [g.h1,g.h2,g.h3].forEach(h=>{ if(h&&h.trim()) hob.add(h.trim()); });
+  });
+  const fill=(dl,set)=>{ dl.innerHTML=""; [...set].sort().forEach(v=>{ const o=document.createElement("option"); o.value=v; dl.appendChild(o); }); };
+  fill(document.getElementById("dl-jobs"), jobs);
+  fill(document.getElementById("dl-hobbies"), hob);
+}
+
+function renderGrid(){
+  refreshDatalists();
+  const body=document.getElementById("gridBody"); body.innerHTML="";
+  document.getElementById("gCount").textContent = state.guests.length+" convive"+(state.guests.length>1?"s":"");
+  state.guests.forEach(g=>{
+    const tr=document.createElement("tr");
+    tr.innerHTML = `
+      <td><button class="side-btn" data-side="${g.side}" data-id="${g.id}">${g.side==="bride"?"👰🏻‍♀️":"🤵🏻‍♂️"}</button></td>
+      <td><input data-f="name" data-id="${g.id}" value="${esc(g.name)}" placeholder="Nom Prénom"></td>
+      <td class="age-col"><input data-f="age" data-id="${g.id}" type="number" min="0" max="120" value="${g.age??""}" placeholder="—"></td>
+      <td><input data-f="job" data-id="${g.id}" list="dl-jobs" value="${esc(g.job)}" placeholder="Métier"></td>
+      <td><input data-f="h1" data-id="${g.id}" list="dl-hobbies" value="${esc(g.h1)}" placeholder="Hobby 1"></td>
+      <td><input data-f="h2" data-id="${g.id}" list="dl-hobbies" value="${esc(g.h2)}" placeholder="Hobby 2"></td>
+      <td><input data-f="h3" data-id="${g.id}" list="dl-hobbies" value="${esc(g.h3)}" placeholder="Hobby 3"></td>
+      <td><button class="row-del" data-id="${g.id}" title="Supprimer">✕</button></td>`;
+    body.appendChild(tr);
+  });
+}
+function esc(s){ return (s||"").replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;"); }
+
+document.getElementById("gridBody").addEventListener("input", e=>{
+  const inp=e.target.closest("input[data-f]"); if(!inp) return;
+  const g=byId(inp.getAttribute("data-id")); if(!g) return;
+  const f=inp.getAttribute("data-f");
+  if(f==="age"){ g.age = inp.value===""?null:clampInt(inp.value,0,120,null); }
+  else g[f]=inp.value;
+  if(f==="job"||f==="h1"||f==="h2"||f==="h3") refreshDatalists();
+  document.getElementById("gCount").textContent = state.guests.length+" convive"+(state.guests.length>1?"s":"");
+  save();
+});
+document.getElementById("gridBody").addEventListener("click", e=>{
+  const sb=e.target.closest(".side-btn");
+  if(sb){
+    const g=byId(sb.getAttribute("data-id"));
+    g.side = g.side==="groom"?"bride":"groom";
+    sb.setAttribute("data-side",g.side);
+    sb.textContent = g.side==="bride"?"👰🏻‍♀️":"🤵🏻‍♂️";
+    save(); return;
+  }
+  const del=e.target.closest(".row-del");
+  if(del){
+    const id=del.getAttribute("data-id");
+    state.guests = state.guests.filter(x=>x.id!==id);
+    state.links  = state.links.filter(l=>l.a!==id && l.b!==id);
+    delete state.assignment[id];
+    save(); renderGrid();
+  }
+});
+
+/* ============ RÉGLAGES (poids) ============ */
+const wmap = { wjob:"job", whob:"hobby", wac:"ageClose", wam:"ageMid", waf:"ageFar" };
+function refreshWeightLabels(){
+  const fmt=v=>(v>0?"+":"")+v;
+  document.getElementById("wjobV").textContent=fmt(state.weights.job);
+  document.getElementById("whobV").textContent=fmt(state.weights.hobby);
+  document.getElementById("wacV").textContent=fmt(state.weights.ageClose);
+  document.getElementById("wamV").textContent=fmt(state.weights.ageMid);
+  document.getElementById("wafV").textContent=fmt(state.weights.ageFar);
+}
+Object.keys(wmap).forEach(id=>{
+  document.getElementById(id).addEventListener("input", e=>{
+    state.weights[wmap[id]] = parseInt(e.target.value,10);
+    refreshWeightLabels(); save();
+  });
+});
+document.getElementById("openSettings").addEventListener("click", ()=>document.getElementById("settings").classList.add("show"));
+document.getElementById("closeSettings").addEventListener("click", ()=>document.getElementById("settings").classList.remove("show"));
+
+/* ============ RESET ============ */
+document.getElementById("resetAll").addEventListener("click", ()=>{
+  if(!confirm("Tout réinitialiser (convives, liens, plan) ?")) return;
+  state = { config:{tables:6,seats:8,kids:false}, guests:[], links:[],
+    weights:{job:3,hobby:2,ageClose:2,ageMid:1,ageFar:-1}, assignment:{}, tables:[] };
+  uid=1; linkMode=null; linkFirst=null;
+  document.querySelectorAll(".linktool .lt").forEach(x=>x.classList.remove("active"));
+  document.getElementById("banner").classList.remove("show");
+  document.getElementById("scorebadge").classList.remove("show");
+  applyConfigToInputs(); refreshWeightLabels(); save(); render();
+});
+
+document.getElementById("seatBtn").addEventListener("click", optimize);
+
+/* ============ SAVE / LOAD / PRINT ============ */
+document.getElementById("saveBtn").addEventListener("click", ()=>{
+  syncConfig();
+  const data = JSON.stringify({ format:"wedding-tabler", version:1, state, uid }, null, 2);
+  const blob = new Blob([data], { type:"application/json" });
+  const url  = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const stamp = new Date().toISOString().slice(0,10);
+  a.href = url; a.download = "wedding-tabler-"+stamp+".json";
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+  toast("Projet exporté en JSON.");
+});
+
+document.getElementById("loadBtn").addEventListener("click", ()=>document.getElementById("loadFile").click());
+document.getElementById("loadFile").addEventListener("change", e=>{
+  const file = e.target.files[0]; if(!file) return;
+  const r = new FileReader();
+  r.onload = ()=>{
+    try{
+      const o = JSON.parse(r.result);
+      const s = o.state || o;                 // accepte {state,uid} ou un état brut
+      if(!s || !s.config || !Array.isArray(s.guests)) throw new Error("structure");
+      state = s; uid = o.uid || s._uid || 1;
+      state.links      = state.links || [];
+      state.assignment = state.assignment || {};
+      state.tables     = state.tables || [];
+      state.weights    = state.weights || { job:3, hobby:2, ageClose:2, ageMid:1, ageFar:-1 };
+      // garantir des ids uniques pour la suite
+      let maxN = 0; state.guests.forEach(g=>{ const m=/(\d+)/.exec(g.id||""); if(m) maxN=Math.max(maxN,+m[1]); });
+      uid = Math.max(uid, maxN+1);
+      linkMode=null; linkFirst=null;
+      document.querySelectorAll(".linktool .lt").forEach(x=>x.classList.remove("active"));
+      document.getElementById("banner").classList.remove("show");
+      applyConfigToInputs(); refreshWeightLabels(); save(); render();
+      document.getElementById("scorebadge").classList.toggle("show", state.tables.length>0);
+      toast("Projet chargé · "+state.guests.length+" convives.");
+    }catch(err){
+      toast("Fichier JSON invalide ou incompatible.");
+    }
+  };
+  r.readAsText(file);
+  e.target.value = "";   // permet de recharger le même fichier
+});
+
+function buildPrintDoc(){
+  const tables = displayTables();
+  const dateStr = new Date().toLocaleDateString("fr-FR", { day:"numeric", month:"long", year:"numeric" });
+  let h = `<div class="pd-head"><h1>Plan de table</h1>`+
+          `<div class="pd-sub">${state.guests.length} convives · ${tables.length} tables · ${dateStr}</div></div>`;
+  h += `<div class="pd-grid">`;
+  tables.forEach(t=>{
+    h += `<div class="pd-card${t.isKids?" pd-kids":""}">`+
+         `<h2>${t.isKids?"🍼 "+t.label:t.label}<span>${t.members.length}/${t.capacity}</span></h2>`;
+    if(!t.members.length){ h += `<ol><li class="pd-empty">— vide —</li></ol></div>`; return; }
+    h += `<ol>`;
+    t.members.forEach(mid=>{
+      const g = byId(mid); if(!g) return;
+      const dot = g.side==="bride" ? "bride" : "groom";
+      h += `<li><span class="pd-dot ${dot}"></span>${esc(g.name||"(sans nom)")}`+
+           `${g.age!=null?` <em>· ${g.age} ans</em>`:""}`+
+           `${g.job?` <em>· ${esc(g.job)}</em>`:""}</li>`;
+    });
+    h += `</ol></div>`;
+  });
+  h += `</div>`;
+  /* convives non placés */
+  const unassigned = state.tables.length ? state.guests.filter(g=>!state.assignment[g.id]) : [];
+  if(unassigned.length){
+    h += `<div class="pd-card pd-un"><h2>Non placés<span>${unassigned.length}</span></h2><ol>`;
+    unassigned.forEach(g=>{
+      const dot = g.side==="bride" ? "bride" : "groom";
+      h += `<li><span class="pd-dot ${dot}"></span>${esc(g.name||"(sans nom)")}</li>`;
+    });
+    h += `</ol></div>`;
+  }
+  document.getElementById("printDoc").innerHTML = h;
+}
+document.getElementById("printBtn").addEventListener("click", ()=>{
+  syncConfig();
+  if(state.guests.length===0){ toast("Ajoutez des convives avant d'imprimer."); return; }
+  if(state.tables.length===0){ toast("Astuce : lancez « À TABLE ! » pour remplir les listes. J'imprime quand même les tables vides."); }
+  buildPrintDoc();
+  setTimeout(()=>window.print(), 60);
+});
+
+/* ============ INIT ============ */
+function applyConfigToInputs(){
+  document.getElementById("cfgTables").value = state.config.tables;
+  document.getElementById("cfgSeats").value  = state.config.seats;
+  document.getElementById("cfgKids").checked = state.config.kids;
+  ["wjob","whob","wac","wam","waf"].forEach(id=>{ document.getElementById(id).value = state.weights[wmap[id]]; });
+}
+load();
+applyConfigToInputs();
+refreshWeightLabels();
+render();
+if(state.tables.length){ document.getElementById("scoreVal").textContent = tablesScore(displayTables().map(t=>t.members.map(byId).filter(Boolean))); document.getElementById("scorebadge").classList.add("show"); }
+</script>
+</body>
+</html>
