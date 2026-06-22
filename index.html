@@ -139,6 +139,23 @@
   .ghead h2{font-family:var(--serif);font-weight:600;margin:0;font-size:24px}
   .ghead .count{color:var(--ink-soft);font-size:13px}
   .gwrap{flex:1 1 auto;overflow:auto;padding:18px 22px}
+
+  /* bloc Les mariés */
+  .married{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:22px}
+  .m-card{border:1px solid var(--line);border-radius:14px;padding:14px 16px;background:#fff;position:relative}
+  .m-card.groom{border-color:rgba(47,107,181,.45);box-shadow:inset 0 0 0 1px rgba(47,107,181,.12)}
+  .m-card.bride{border-color:rgba(199,94,132,.45);box-shadow:inset 0 0 0 1px rgba(199,94,132,.12)}
+  .m-card .m-tag{font-family:var(--serif);font-size:18px;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+  .m-card.groom .m-tag{color:var(--groom)}
+  .m-card.bride .m-tag{color:var(--bride)}
+  .m-card .m-name{width:100%;border:1px solid var(--line);border-radius:8px;padding:9px 10px;font:inherit;font-size:15px}
+  .m-card .m-name:focus{outline:none;border-color:var(--gold);box-shadow:0 0 0 3px rgba(184,155,94,.14)}
+  .m-row{display:grid;grid-template-columns:64px 1fr;gap:8px;margin-bottom:8px}
+  .m-row.hobbies{grid-template-columns:1fr 1fr 1fr}
+  .m-card .m-row input{border:1px solid var(--line);border-radius:8px;padding:8px 9px;font:inherit;font-size:13px;width:100%}
+  .m-card .m-row input:focus{outline:none;border-color:var(--gold)}
+  .married-hint{grid-column:1 / -1;font-size:12px;color:var(--ink-soft);margin:-8px 0 0;display:flex;align-items:center;gap:7px}
+  .convives-title{font-family:var(--serif);font-size:18px;margin:0 0 10px;color:var(--ink)}
   table.grid{border-collapse:separate;border-spacing:0;width:100%;min-width:760px;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden}
   table.grid th{
     font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-soft);
@@ -277,6 +294,19 @@
       <button class="btn primary" id="closeGuests">Retour au plan</button>
     </div>
     <div class="gwrap">
+      <div class="married">
+        <div class="m-card groom">
+          <div class="m-tag">🤵🏻‍♂️ Le marié</div>
+          <input class="m-name" data-couple="marie" data-f="name" placeholder="Nom Prénom du marié">
+        </div>
+        <div class="m-card bride">
+          <div class="m-tag">👰🏻‍♀️ La mariée</div>
+          <input class="m-name" data-couple="mariee" data-f="name" placeholder="Nom Prénom de la mariée">
+        </div>
+        <p class="married-hint">👑 Les mariés sont placés <b>toujours à la même table</b>. Laissez vide pour ne pas les afficher.</p>
+      </div>
+
+      <h3 class="convives-title">Les convives</h3>
       <table class="grid">
         <thead>
           <tr>
@@ -316,8 +346,15 @@
 
 /* ============ ÉTAT ============ */
 const LS_KEY = "wedding-tabler-v1";
+function freshCouple(){
+  return {
+    marie:  { id:"M", role:"marie",  side:"groom", name:"", age:null, job:"", h1:"", h2:"", h3:"" },
+    mariee: { id:"F", role:"mariee", side:"bride", name:"", age:null, job:"", h1:"", h2:"", h3:"" }
+  };
+}
 let state = {
   config:  { tables:6, seats:8, kids:false },
+  couple:  freshCouple(),   // les mariés (ids fixes "M" / "F"), toujours à la même table
   guests:  [],          // {id, side, name, age|null, job, h1, h2, h3}
   links:   [],          // {id, a, b, type:'lock'|'couple'|'baby'}
   weights: { job:3, hobby:2, ageClose:2, ageMid:1, ageFar:-1 },
@@ -326,6 +363,12 @@ let state = {
 };
 let uid = 1;
 const newId = () => "g"+(uid++);
+
+/* convives mariés actifs (= renseignés) + ensemble de travail complet */
+function coupleList(){ return [state.couple.marie, state.couple.mariee]; }
+function namedCouple(){ return coupleList().filter(c=>c.name && c.name.trim()); }
+function allGuests(){ return [...namedCouple(), ...state.guests]; }
+function gName(g){ return (g && g.role ? "👑 " : "") + ((g && g.name && g.name.trim()) ? g.name.trim() : "(sans nom)"); }
 
 /* link tool runtime */
 let linkMode = null;     // 'lock'|'couple'|'baby'|null
@@ -342,6 +385,7 @@ function load(){
     const o = JSON.parse(raw);
     if(o && o.state){ state = o.state; uid = o.uid||1;
       state.assignment = state.assignment||{}; state.tables = state.tables||[];
+      if(!state.couple) state.couple = freshCouple();
       return true; }
   }catch(e){}
   return false;
@@ -349,7 +393,11 @@ function load(){
 
 /* ============ UTILITAIRES ============ */
 const norm = s => (s||"").trim().toLowerCase();
-const byId = id => state.guests.find(g=>g.id===id);
+function byId(id){
+  if(id==="M") return state.couple.marie;
+  if(id==="F") return state.couple.mariee;
+  return state.guests.find(g=>g.id===id);
+}
 const CX = 600, CY = 600;
 
 function toast(msg, warns){
@@ -457,9 +505,11 @@ function seatPool(pool, links, includeBaby, nTables, seats){
 /* ============ OPTIMISATION GLOBALE ============ */
 function optimize(){
   syncConfig();
-  if(state.guests.length===0){ toast("Aucun convive à placer."); return; }
+  const working = allGuests();
+  if(working.length===0){ toast("Aucun convive à placer."); return; }
   const { tables:T, seats:S, kids:kidsMode } = state.config;
   const warnings = [];
+  const couple = namedCouple();           // les mariés renseignés = toujours adultes, ensemble
 
   let adultPool, kidPool = [];
   if(kidsMode){
@@ -468,12 +518,17 @@ function optimize(){
   } else {
     adultPool = state.guests.slice();
   }
+  adultPool = [...couple, ...adultPool];   // les mariés s'asseyent toujours côté adultes
+
+  /* lien implicite et permanent entre le marié et la mariée */
+  let adultLinks = state.links;
+  if(couple.length===2) adultLinks = [...state.links, { id:"__couple", a:"M", b:"F", type:"couple" }];
 
   if(adultPool.length > T*S){
     warnings.push(`${adultPool.length} adultes pour ${T*S} places : il manque ${adultPool.length-T*S} place(s).`);
   }
 
-  const adultRes = seatPool(adultPool, state.links, !kidsMode, T, S);
+  const adultRes = seatPool(adultPool, adultLinks, !kidsMode, T, S);
 
   let kidRes = null, nKid = 0;
   if(kidsMode && kidPool.length){
@@ -531,8 +586,11 @@ function sideAngles(){
   };
   const bride = state.guests.filter(g=>g.side==="bride"); // droite
   const groom = state.guests.filter(g=>g.side==="groom"); // gauche
-  place(bride, -76, 76);
-  place(groom, 104, 256);
+  place(bride, -70, 76);
+  place(groom, 104, 250);
+  /* les mariés trônent au sommet, de part et d'autre du 12h */
+  if(state.couple.marie.name  && state.couple.marie.name.trim())  map["M"] = -97;
+  if(state.couple.mariee.name && state.couple.mariee.name.trim()) map["F"] = -83;
   return map;
 }
 
@@ -616,25 +674,36 @@ function render(){
     svg.appendChild(g);
   });
 
-  /* --- rayons / convives --- */
-  state.guests.forEach(g=>{
-    const a = (ang[g.id]||0)*Math.PI/180;
+  /* --- rayons / convives (mariés inclus) --- */
+  allGuests().forEach(g=>{
+    if(ang[g.id]===undefined) return;
+    const a = (ang[g.id])*Math.PI/180;
+    const isCouple = !!g.role;
     const col = g.side==="bride" ? "var(--bride)" : "var(--groom)";
     const ix=CX+Rin*Math.cos(a), iy=CY+Rin*Math.sin(a);
     const tx=CX+Rtick*Math.cos(a), ty=CY+Rtick*Math.sin(a);
     const lx=CX+Rlbl*Math.cos(a), ly=CY+Rlbl*Math.sin(a);
-    let rot = (ang[g.id]||0), anchor="start";
+    let rot = (ang[g.id]), anchor="start";
     if(Math.cos(a)<0){ rot += 180; anchor="end"; }
     const selected = linkFirst===g.id;
     const grp = el("g",{ "data-guest":g.id, style:"cursor:pointer" });
-    grp.appendChild(el("line",{ x1:ix,y1:iy,x2:tx,y2:ty, stroke:col, "stroke-width":selected?3:1.6, "stroke-opacity":selected?1:.8 }));
-    grp.appendChild(el("circle",{ cx:tx, cy:ty, r:selected?5:3.4, fill:col }));
-    const label = (g.name && g.name.trim()) ? g.name.trim() : "(sans nom)";
+    grp.appendChild(el("line",{ x1:ix,y1:iy,x2:tx,y2:ty, stroke:col,
+      "stroke-width":selected?3:(isCouple?2.6:1.6), "stroke-opacity":selected?1:.85 }));
+    grp.appendChild(el("circle",{ cx:tx, cy:ty, r:isCouple?5.5:(selected?5:3.4), fill:col,
+      stroke:isCouple?"var(--gold)":"none", "stroke-width":isCouple?2:0 }));
+    const label = (isCouple?"👑 ":"") + ((g.name && g.name.trim()) ? g.name.trim() : "(sans nom)");
     const txt = el("text",{ x:lx, y:ly, "text-anchor":anchor, transform:`rotate(${rot} ${lx} ${ly})`,
-      "font-size":14, fill:col, "font-weight":selected?700:500, "dominant-baseline":"middle" }, label);
+      "font-size":isCouple?16:14, fill:col, "font-weight":(selected||isCouple)?700:500,
+      "dominant-baseline":"middle",
+      "font-family": isCouple?"var(--serif)":"var(--sans)" }, label);
     grp.appendChild(txt);
     svg.appendChild(grp);
   });
+
+  /* petit cœur au sommet si les deux mariés sont renseignés */
+  if(namedCouple().length===2){
+    svg.appendChild(el("text",{ x:CX, y:CY-Rin-18, "text-anchor":"middle", "font-size":18 }, "❤️"));
+  }
 
   document.getElementById("scorebadge").classList.toggle("show", state.tables.length>0);
 }
@@ -667,7 +736,7 @@ function createLink(a,b,type){
   if(exists){ toast("Ces deux convives sont déjà liés."); return; }
   state.links.push({ id:"l"+(uid++), a, b, type });
   save();
-  const names = (byId(a)?.name||"?")+" ↔ "+(byId(b)?.name||"?");
+  const names = gName(byId(a))+" ↔ "+gName(byId(b));
   toast("Lien créé : "+names);
 }
 
@@ -687,7 +756,7 @@ function showTablePanel(tid){
       const pip=document.createElement("span"); pip.className="pip";
       pip.style.background = g.side==="bride"?"var(--bride)":"var(--groom)";
       li.appendChild(pip);
-      li.appendChild(document.createTextNode((g.name||"(sans nom)")+(g.age!=null?" · "+g.age+" ans":"")));
+      li.appendChild(document.createTextNode(gName(g)+(g.age!=null?" · "+g.age+" ans":"")));
       ul.appendChild(li);
     });
   }
@@ -743,7 +812,7 @@ document.getElementById("addRow").addEventListener("click", ()=>{
 
 function refreshDatalists(){
   const jobs=new Set(), hob=new Set();
-  state.guests.forEach(g=>{
+  [...coupleList(), ...state.guests].forEach(g=>{
     if(g.job&&g.job.trim()) jobs.add(g.job.trim());
     [g.h1,g.h2,g.h3].forEach(h=>{ if(h&&h.trim()) hob.add(h.trim()); });
   });
@@ -752,8 +821,17 @@ function refreshDatalists(){
   fill(document.getElementById("dl-hobbies"), hob);
 }
 
+function fillCoupleInputs(){
+  document.querySelectorAll('input[data-couple]').forEach(inp=>{
+    const c = state.couple[inp.getAttribute("data-couple")];
+    const f = inp.getAttribute("data-f");
+    inp.value = (f==="age") ? (c.age??"") : (c[f]||"");
+  });
+}
+
 function renderGrid(){
   refreshDatalists();
+  fillCoupleInputs();
   const body=document.getElementById("gridBody"); body.innerHTML="";
   document.getElementById("gCount").textContent = state.guests.length+" convive"+(state.guests.length>1?"s":"");
   state.guests.forEach(g=>{
@@ -771,6 +849,18 @@ function renderGrid(){
   });
 }
 function esc(s){ return (s||"").replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;"); }
+
+/* saisie des mariés */
+document.querySelectorAll('input[data-couple]').forEach(inp=>{
+  inp.addEventListener("input", ()=>{
+    const c = state.couple[inp.getAttribute("data-couple")];
+    const f = inp.getAttribute("data-f");
+    if(f==="age") c.age = inp.value===""?null:clampInt(inp.value,0,120,null);
+    else c[f] = inp.value;
+    if(["job","h1","h2","h3"].includes(f)) refreshDatalists();
+    save();
+  });
+});
 
 document.getElementById("gridBody").addEventListener("input", e=>{
   const inp=e.target.closest("input[data-f]"); if(!inp) return;
@@ -823,12 +913,13 @@ document.getElementById("closeSettings").addEventListener("click", ()=>document.
 /* ============ RESET ============ */
 document.getElementById("resetAll").addEventListener("click", ()=>{
   if(!confirm("Tout réinitialiser (convives, liens, plan) ?")) return;
-  state = { config:{tables:6,seats:8,kids:false}, guests:[], links:[],
+  state = { config:{tables:6,seats:8,kids:false}, couple:freshCouple(), guests:[], links:[],
     weights:{job:3,hobby:2,ageClose:2,ageMid:1,ageFar:-1}, assignment:{}, tables:[] };
   uid=1; linkMode=null; linkFirst=null;
   document.querySelectorAll(".linktool .lt").forEach(x=>x.classList.remove("active"));
   document.getElementById("banner").classList.remove("show");
   document.getElementById("scorebadge").classList.remove("show");
+  fillCoupleInputs();
   applyConfigToInputs(); refreshWeightLabels(); save(); render();
 });
 
@@ -862,13 +953,14 @@ document.getElementById("loadFile").addEventListener("change", e=>{
       state.assignment = state.assignment || {};
       state.tables     = state.tables || [];
       state.weights    = state.weights || { job:3, hobby:2, ageClose:2, ageMid:1, ageFar:-1 };
+      if(!state.couple) state.couple = freshCouple();
       // garantir des ids uniques pour la suite
       let maxN = 0; state.guests.forEach(g=>{ const m=/(\d+)/.exec(g.id||""); if(m) maxN=Math.max(maxN,+m[1]); });
       uid = Math.max(uid, maxN+1);
       linkMode=null; linkFirst=null;
       document.querySelectorAll(".linktool .lt").forEach(x=>x.classList.remove("active"));
       document.getElementById("banner").classList.remove("show");
-      applyConfigToInputs(); refreshWeightLabels(); save(); render();
+      applyConfigToInputs(); refreshWeightLabels(); fillCoupleInputs(); save(); render();
       document.getElementById("scorebadge").classList.toggle("show", state.tables.length>0);
       toast("Projet chargé · "+state.guests.length+" convives.");
     }catch(err){
@@ -881,9 +973,10 @@ document.getElementById("loadFile").addEventListener("change", e=>{
 
 function buildPrintDoc(){
   const tables = displayTables();
+  const total = allGuests().length;
   const dateStr = new Date().toLocaleDateString("fr-FR", { day:"numeric", month:"long", year:"numeric" });
   let h = `<div class="pd-head"><h1>Plan de table</h1>`+
-          `<div class="pd-sub">${state.guests.length} convives · ${tables.length} tables · ${dateStr}</div></div>`;
+          `<div class="pd-sub">${total} convives · ${tables.length} tables · ${dateStr}</div></div>`;
   h += `<div class="pd-grid">`;
   tables.forEach(t=>{
     h += `<div class="pd-card${t.isKids?" pd-kids":""}">`+
@@ -893,7 +986,7 @@ function buildPrintDoc(){
     t.members.forEach(mid=>{
       const g = byId(mid); if(!g) return;
       const dot = g.side==="bride" ? "bride" : "groom";
-      h += `<li><span class="pd-dot ${dot}"></span>${esc(g.name||"(sans nom)")}`+
+      h += `<li><span class="pd-dot ${dot}"></span>${g.role?"👑 ":""}${esc(g.name||"(sans nom)")}`+
            `${g.age!=null?` <em>· ${g.age} ans</em>`:""}`+
            `${g.job?` <em>· ${esc(g.job)}</em>`:""}</li>`;
     });
@@ -914,7 +1007,7 @@ function buildPrintDoc(){
 }
 document.getElementById("printBtn").addEventListener("click", ()=>{
   syncConfig();
-  if(state.guests.length===0){ toast("Ajoutez des convives avant d'imprimer."); return; }
+  if(allGuests().length===0){ toast("Ajoutez des convives avant d'imprimer."); return; }
   if(state.tables.length===0){ toast("Astuce : lancez « À TABLE ! » pour remplir les listes. J'imprime quand même les tables vides."); }
   buildPrintDoc();
   setTimeout(()=>window.print(), 60);
