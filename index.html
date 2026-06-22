@@ -457,18 +457,21 @@ function seatPool(pool, links, includeBaby, nTables, seats){
   groups.sort((a,b)=>b.length-a.length);
 
   const gain = (group, table)=>{ let g=0; for(const x of group) for(const y of table) g+=aff(x,y); return g; };
+  const emptiest = ()=>{ let best=0,min=Infinity; for(let t=0;t<nTables;t++){ if(tables[t].length<min){min=tables[t].length;best=t;} } return best; };
 
   for(const group of groups){
-    if(group.length>seats){ oversized.push(group); unseated.push(...group); continue; }
     let best=-1, bestG=-Infinity;
     for(let t=0;t<nTables;t++){
-      if(tables[t].length+group.length<=seats){
+      if(tables[t].length+group.length<=seats){          // table sous capacité
         const g = gain(group, tables[t]);
         if(g>bestG){ bestG=g; best=t; }
       }
     }
-    if(best<0) unseated.push(...group);
-    else tables[best].push(...group);
+    if(best<0){                                          // aucune place libre :
+      best = emptiest();                                 // débordement sur la table la plus vide
+      if(group.length>seats) oversized.push(group);      // groupe lié plus grand qu'une table
+    }
+    tables[best].push(...group);                         // → personne n'est jamais laissé de côté
   }
 
   /* recherche locale : déplacements / échanges de convives non liés */
@@ -524,10 +527,6 @@ function optimize(){
   let adultLinks = state.links;
   if(couple.length===2) adultLinks = [...state.links, { id:"__couple", a:"M", b:"F", type:"couple" }];
 
-  if(adultPool.length > T*S){
-    warnings.push(`${adultPool.length} adultes pour ${T*S} places : il manque ${adultPool.length-T*S} place(s).`);
-  }
-
   const adultRes = seatPool(adultPool, adultLinks, !kidsMode, T, S);
 
   let kidRes = null, nKid = 0;
@@ -552,10 +551,12 @@ function optimize(){
     });
   }
 
-  const unseated = [...adultRes.unseated, ...(kidRes?kidRes.unseated:[])];
-  adultRes.oversized.forEach(g=>warnings.push(`Groupe lié de ${g.length} pers. > ${S} places : impossible sur une table.`));
-  const reallyUnseated = unseated.filter(g=>!state.assignment[g.id]);
-  if(reallyUnseated.length) warnings.push(`${reallyUnseated.length} convive(s) non placé(s) : faute de place.`);
+  /* personne n'est jamais « non placé » : on signale seulement une éventuelle surcapacité */
+  const over = state.tables.filter(t=>t.members.length>t.capacity);
+  if(over.length){
+    const totalSeats = T*S + (kidRes? nKid*S : 0);
+    warnings.push(`Tout le monde est placé, mais ${over.length} table(s) dépassent leur capacité (${working.length} convives pour ${totalSeats} places). Ajoutez des tables ou des places.`);
+  }
 
   const score = tablesScore([...adultRes.tables, ...(kidRes?kidRes.tables:[])]);
   document.getElementById("scoreVal").textContent = score;
@@ -1035,16 +1036,6 @@ function buildPrintDoc(){
     h += `</ol></div>`;
   });
   h += `</div>`;
-  /* convives non placés */
-  const unassigned = state.tables.length ? state.guests.filter(g=>!state.assignment[g.id]) : [];
-  if(unassigned.length){
-    h += `<div class="pd-card pd-un"><h2>Non placés<span>${unassigned.length}</span></h2><ol>`;
-    unassigned.forEach(g=>{
-      const dot = g.side==="bride" ? "bride" : "groom";
-      h += `<li><span class="pd-dot ${dot}"></span>${esc(g.name||"(sans nom)")}</li>`;
-    });
-    h += `</ol></div>`;
-  }
   document.getElementById("printDoc").innerHTML = h;
 }
 document.getElementById("printBtn").addEventListener("click", ()=>{
