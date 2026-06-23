@@ -138,6 +138,10 @@
   }
   .ghead h2{font-family:var(--serif);font-weight:600;margin:0;font-size:24px}
   .ghead .count{color:var(--ink-soft);font-size:13px}
+  .dup-badge{font-size:12px;font-weight:600;color:#fff;background:var(--warn);padding:3px 9px;border-radius:999px}
+  tr.is-dup td{background:#fbeee7}
+  tr.is-dup input[data-f=name]{color:var(--warn);font-weight:600}
+  .dup-tag{display:inline-block;font-size:10px;color:#fff;background:var(--warn);border-radius:4px;padding:1px 5px;margin-left:6px;vertical-align:middle}
   .gwrap{flex:1 1 auto;overflow:auto;padding:18px 22px}
 
   /* bloc Les mariés */
@@ -248,8 +252,9 @@
   <div class="linktool" title="Outil de lien : choisir un type puis cliquer deux convives">
     <span class="lt-label">Lier</span>
     <button class="lt" data-link="lock"   title="Même table (obligatoire)">🔒</button>
-    <button class="lt" data-link="couple" title="Couple → même table">❤️</button>
+    <button class="lt" data-link="couple" title="Couple → même table, côte à côte">❤️</button>
     <button class="lt" data-link="baby"   title="Même table sauf si table d'enfant">🍼</button>
+    <button class="lt" data-link="storm"  title="Jamais à la même table">🌩️</button>
   </div>
 
   <div class="spacer"></div>
@@ -276,7 +281,7 @@
     <div class="row"><span class="dot" style="background:var(--groom)"></span> Côté marié 🤵🏻‍♂️</div>
     <div class="row"><span class="dot" style="background:var(--bride)"></span> Côté mariée 👰🏻‍♀️</div>
     <div class="row"><span class="dot" style="background:var(--kids)"></span> Enfants 🍼</div>
-    <div class="row" style="margin-top:6px;color:var(--ink-soft);font-size:11px">🔒 obligatoire · ❤️ couple · 🍼 enfant</div>
+    <div class="row" style="margin-top:6px;color:var(--ink-soft);font-size:11px">🔒 obligatoire · ❤️ couple · 🍼 enfant · 🌩️ séparés</div>
   </div>
 
   <div id="tablepanel">
@@ -289,7 +294,9 @@
     <div class="ghead">
       <h2>Convives</h2>
       <span class="count" id="gCount"></span>
+      <span class="dup-badge" id="dupBadge" title="Convives en double (même nom)" style="display:none"></span>
       <div class="spacer"></div>
+      <button class="btn" id="dedupBtn" style="display:none">🧹 Supprimer les doublons</button>
       <button class="btn" id="addRow">＋ Ajouter une ligne</button>
       <button class="btn primary" id="closeGuests">Retour au plan</button>
     </div>
@@ -448,61 +455,91 @@ function buildGroups(pool, links, includeBaby){
 
 /* ============ PLACEMENT D'UN POOL ============ */
 function seatPool(pool, links, includeBaby, nTables, seats){
+  /* sécurité : un même convive (même id) ne peut jamais être compté deux fois */
+  const seenId=new Set();
+  pool = pool.filter(g=>{ if(seenId.has(g.id)) return false; seenId.add(g.id); return true; });
+
   const groups = buildGroups(pool, links, includeBaby);
   const tables = Array.from({length:nTables}, ()=>[]);
-  const unseated = [], oversized = [];
+  const oversized = [];
   const movable = new Set();
   groups.forEach(g=>{ if(g.length===1) movable.add(g[0].id); });
 
-  groups.sort((a,b)=>b.length-a.length);
+  /* paires 🌩️ : interdites à la même table */
+  const inPool = new Set(pool.map(g=>g.id));
+  const key = (a,b)=> a<b ? a+"|"+b : b+"|"+a;
+  const forbid = new Set();
+  links.forEach(l=>{ if(l.type==="storm" && l.a!==l.b && inPool.has(l.a) && inPool.has(l.b)) forbid.add(key(l.a,l.b)); });
+  const pairForbidden = (x,y)=> forbid.has(key(x,y));
+  const placeOK = (group, table)=>{ for(const x of group) for(const y of table) if(pairForbidden(x.id,y.id)) return false; return true; };
+  const conflicts = (table)=>{ let c=0; for(let i=0;i<table.length;i++) for(let j=i+1;j<table.length;j++) if(pairForbidden(table[i].id,table[j].id)) c++; return c; };
 
   const gain = (group, table)=>{ let g=0; for(const x of group) for(const y of table) g+=aff(x,y); return g; };
   const emptiest = ()=>{ let best=0,min=Infinity; for(let t=0;t<nTables;t++){ if(tables[t].length<min){min=tables[t].length;best=t;} } return best; };
 
+  /* PHASE 1 — répartition ÉQUILIBRÉE sur toutes les tables :
+     table la MOINS remplie qui peut accueillir le groupe SANS conflit 🌩️ ;
+     l'affinité ne sert qu'à départager à charge égale. */
+  groups.sort((a,b)=>b.length-a.length);
   for(const group of groups){
-    let best=-1, bestG=-Infinity;
+    let best=-1, bestLoad=Infinity, bestGain=-Infinity;
     for(let t=0;t<nTables;t++){
-      if(tables[t].length+group.length<=seats){          // table sous capacité
-        const g = gain(group, tables[t]);
-        if(g>bestG){ bestG=g; best=t; }
+      if(tables[t].length+group.length<=seats && placeOK(group, tables[t])){
+        const load=tables[t].length, g=gain(group, tables[t]);
+        if(load<bestLoad || (load===bestLoad && g>bestGain)){ best=t; bestLoad=load; bestGain=g; }
       }
     }
-    if(best<0){                                          // aucune place libre :
-      best = emptiest();                                 // débordement sur la table la plus vide
-      if(group.length>seats) oversized.push(group);      // groupe lié plus grand qu'une table
+    if(best<0){                                   // pas de table sous capacité sans conflit
+      let min=Infinity;                           // → on garde « sans conflit », on tolère le débordement
+      for(let t=0;t<nTables;t++){ if(placeOK(group, tables[t]) && tables[t].length<min){ min=tables[t].length; best=t; } }
     }
-    tables[best].push(...group);                         // → personne n'est jamais laissé de côté
+    if(best<0){ best=emptiest(); }                // contrainte 🌩️ impossible à honorer → on place quand même
+    if(group.length>seats) oversized.push(group);
+    tables[best].push(...group);
   }
 
-  /* recherche locale : déplacements / échanges de convives non liés */
+  /* PHASE 2 — optimisation de l'affinité, sans casser l'équilibre NI créer de conflit 🌩️ */
   let cur = tablesScore(tables), improved = true, guard = 0;
   while(improved && guard++<80){
     improved = false;
-    for(let a=0;a<tables.length;a++){
-      for(let b=0;b<tables.length;b++){
+    for(let a=0;a<nTables;a++){
+      for(let b=0;b<nTables;b++){
         if(a===b) continue;
+        for(let i=0;i<tables[a].length;i++){
+          if(!(tables[a].length>tables[b].length && tables[b].length<seats)) break;
+          const ga = tables[a][i];
+          if(!movable.has(ga.id)) continue;
+          const cB = conflicts(tables[a]) + conflicts(tables[b]);
+          tables[b].push(ga); tables[a].splice(i,1);
+          const ns = tablesScore(tables);
+          const cA = conflicts(tables[a]) + conflicts(tables[b]);
+          if(ns>cur+1e-9 && cA<=cB){ cur=ns; improved=true; i--; }
+          else { tables[a].splice(i,0,ga); tables[b].pop(); }
+        }
         for(let i=0;i<tables[a].length;i++){
           const ga = tables[a][i];
           if(!movable.has(ga.id)) continue;
-          if(tables[b].length<seats){                 // déplacement simple
-            tables[b].push(ga); tables[a].splice(i,1);
-            const ns = tablesScore(tables);
-            if(ns>cur+1e-9){ cur=ns; improved=true; i--; continue; }
-            tables[a].splice(i,0,ga); tables[b].pop();
-          }
-          for(let j=0;j<tables[b].length;j++){        // échange
+          for(let j=0;j<tables[b].length;j++){
             const gb = tables[b][j];
             if(!movable.has(gb.id)) continue;
+            const cB = conflicts(tables[a]) + conflicts(tables[b]);
             tables[a][i]=gb; tables[b][j]=ga;
             const ns = tablesScore(tables);
-            if(ns>cur+1e-9){ cur=ns; improved=true; }
+            const cA = conflicts(tables[a]) + conflicts(tables[b]);
+            if(ns>cur+1e-9 && cA<=cB){ cur=ns; improved=true; break; }
             else { tables[a][i]=ga; tables[b][j]=gb; }
           }
         }
       }
     }
   }
-  return { tables, unseated, oversized };
+
+  /* liens 🌩️ non respectés (placés malgré tout à la même table) */
+  const tableOf = {}; tables.forEach((t,ti)=>t.forEach(g=>tableOf[g.id]=ti));
+  let stormUnmet = 0;
+  forbid.forEach(k=>{ const p=k.split("|"); if(tableOf[p[0]]!==undefined && tableOf[p[0]]===tableOf[p[1]]) stormUnmet++; });
+
+  return { tables, oversized, stormUnmet };
 }
 
 /* ============ OPTIMISATION GLOBALE ============ */
@@ -556,6 +593,12 @@ function optimize(){
   if(over.length){
     const totalSeats = T*S + (kidRes? nKid*S : 0);
     warnings.push(`Tout le monde est placé, mais ${over.length} table(s) dépassent leur capacité (${working.length} convives pour ${totalSeats} places). Ajoutez des tables ou des places.`);
+  }
+
+  /* liens 🌩️ qui n'ont pas pu être respectés */
+  const stormUnmet = (adultRes.stormUnmet||0) + (kidRes?(kidRes.stormUnmet||0):0);
+  if(stormUnmet){
+    warnings.push(`${stormUnmet} lien(s) 🌩️ non respecté(s) : trop de contraintes pour le nombre de tables, ou en conflit avec un 🔒/❤️.`);
   }
 
   const score = tablesScore([...adultRes.tables, ...(kidRes?kidRes.tables:[])]);
@@ -683,7 +726,8 @@ function render(){
   });
 
   /* --- liens entre convives --- */
-  const linkGlyph = { lock:"🔒", couple:"❤️", baby:"🍼" };
+  const linkGlyph = { lock:"🔒", couple:"❤️", baby:"🍼", storm:"🌩️" };
+  const linkColor = { couple:"var(--bride)", storm:"#5B6B8C", lock:"var(--gold-deep)", baby:"var(--gold-deep)" };
   /* géométrie d'un lien : arc bombé vers l'extérieur (dégage les tables),
      symbole posé exactement au milieu de la courbe (t=0.5) */
   function linkGeom(idA, idB){
@@ -701,10 +745,11 @@ function render(){
   }
   state.links.forEach(l=>{
     const geo=linkGeom(l.a,l.b); if(!geo) return;
-    const isHeart = l.type==="couple";
-    const col = isHeart ? "var(--bride)" : "var(--gold-deep)";
+    const col = linkColor[l.type] || "var(--gold-deep)";
     const g = el("g",{ "data-link":l.id, style:"cursor:pointer" });
-    g.appendChild(el("path",{ d:geo.d, fill:"none", stroke:col, "stroke-width":1.5, "stroke-opacity":.6 }));
+    const path = el("path",{ d:geo.d, fill:"none", stroke:col, "stroke-width":1.5, "stroke-opacity":.6 });
+    if(l.type==="storm") path.setAttribute("stroke-dasharray","5 4");   // trait orage en tireté
+    g.appendChild(path);
     g.appendChild(el("circle",{ cx:geo.hx, cy:geo.hy, r:13, fill:"#fff", stroke:col, "stroke-width":1.2 }));
     g.appendChild(el("text",{ x:geo.hx, y:geo.hy+5, "text-anchor":"middle", "font-size":13 }, linkGlyph[l.type]));
     svg.appendChild(g);
@@ -816,7 +861,7 @@ document.querySelectorAll(".linktool .lt").forEach(b=>{
     else { linkMode=type; linkFirst=null; }
     document.querySelectorAll(".linktool .lt").forEach(x=>x.classList.toggle("active", x.getAttribute("data-link")===linkMode));
     const banner=document.getElementById("banner");
-    const lbl={lock:"🔒 même table obligatoire",couple:"❤️ couple",baby:"🍼 même table sauf table d'enfant"};
+    const lbl={lock:"🔒 même table obligatoire",couple:"❤️ couple",baby:"🍼 même table sauf table d'enfant",storm:"🌩️ jamais à la même table"};
     if(linkMode){ banner.innerHTML="<b>Mode lien — "+lbl[linkMode]+"</b> · cliquez deux convives"; banner.classList.add("show"); }
     else banner.classList.remove("show");
     render();
@@ -872,16 +917,32 @@ function fillCoupleInputs(){
   });
 }
 
+/* doublons = même nom (normalisé). On garde la 1re occurrence. */
+function duplicateIds(){
+  const seen=new Map(), dups=new Set();
+  state.guests.forEach(g=>{
+    const k=norm(g.name); if(!k) return;
+    if(seen.has(k)) dups.add(g.id); else seen.set(k, g.id);
+  });
+  return dups;
+}
+
 function renderGrid(){
   refreshDatalists();
   fillCoupleInputs();
+  const dups = duplicateIds();
   const body=document.getElementById("gridBody"); body.innerHTML="";
   document.getElementById("gCount").textContent = state.guests.length+" convive"+(state.guests.length>1?"s":"");
+  const badge=document.getElementById("dupBadge"), btn=document.getElementById("dedupBtn");
+  if(dups.size){ badge.style.display=""; badge.textContent=dups.size+" doublon"+(dups.size>1?"s":""); btn.style.display=""; }
+  else { badge.style.display="none"; btn.style.display="none"; }
   state.guests.forEach(g=>{
+    const isDup = dups.has(g.id);
     const tr=document.createElement("tr");
+    if(isDup) tr.className="is-dup";
     tr.innerHTML = `
       <td><button class="side-btn" data-side="${g.side}" data-id="${g.id}">${g.side==="bride"?"👰🏻‍♀️":"🤵🏻‍♂️"}</button></td>
-      <td><input data-f="name" data-id="${g.id}" value="${esc(g.name)}" placeholder="Nom Prénom"></td>
+      <td><input data-f="name" data-id="${g.id}" value="${esc(g.name)}" placeholder="Nom Prénom">${isDup?'<span class="dup-tag">doublon</span>':''}</td>
       <td class="age-col"><input data-f="age" data-id="${g.id}" type="number" min="0" max="120" value="${g.age??""}" placeholder="—"></td>
       <td><input data-f="job" data-id="${g.id}" list="dl-jobs" value="${esc(g.job)}" placeholder="Métier"></td>
       <td><input data-f="h1" data-id="${g.id}" list="dl-hobbies" value="${esc(g.h1)}" placeholder="Hobby 1"></td>
@@ -891,6 +952,18 @@ function renderGrid(){
     body.appendChild(tr);
   });
 }
+
+function removeDuplicates(){
+  const dups = duplicateIds();
+  if(!dups.size){ toast("Aucun doublon détecté."); return; }
+  if(!confirm(`Supprimer ${dups.size} doublon(s) (même nom) ? La 1re occurrence de chaque convive est conservée.`)) return;
+  state.guests = state.guests.filter(g=>!dups.has(g.id));
+  state.links  = state.links.filter(l=>!dups.has(l.a) && !dups.has(l.b));
+  dups.forEach(id=>delete state.assignment[id]);
+  save(); renderGrid(); render();
+  toast(dups.size+" doublon(s) supprimé(s).");
+}
+document.getElementById("dedupBtn").addEventListener("click", removeDuplicates);
 function esc(s){ return (s||"").replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;"); }
 
 /* saisie des mariés */
