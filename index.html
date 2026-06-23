@@ -89,14 +89,6 @@
   .banner b{font-weight:600}
   .banner.show{display:flex}
 
-  .legend{
-    position:absolute;left:18px;bottom:16px;background:rgba(255,255,255,.82);
-    border:1px solid var(--line);border-radius:12px;padding:11px 13px;font-size:12px;
-    box-shadow:var(--shadow);z-index:15;backdrop-filter:blur(4px)
-  }
-  .legend .row{display:flex;align-items:center;gap:8px;margin:3px 0}
-  .legend .dot{width:11px;height:11px;border-radius:50%;display:inline-block}
-
   .scorebadge{
     position:absolute;right:18px;top:16px;background:rgba(255,255,255,.9);
     border:1px solid var(--line);border-radius:12px;padding:10px 14px;font-size:12px;
@@ -170,6 +162,8 @@
   table.grid input{width:100%;border:1px solid transparent;background:transparent;padding:7px 8px;border-radius:7px;font:inherit;font-size:13px;color:var(--ink)}
   table.grid input:hover{border-color:var(--line)}
   table.grid input:focus{outline:none;border-color:var(--gold);background:#fff;box-shadow:0 0 0 3px rgba(184,155,94,.12)}
+  table.grid input:disabled{background:#f1efe9;color:#bcb6ab;cursor:not-allowed}
+  tr.is-kid td:first-child{box-shadow:inset 3px 0 0 var(--kids)}
   .age-col input{width:60px}
   .side-btn{
     width:42px;height:36px;border-radius:9px;border:1px solid var(--line);background:#fff;font-size:18px;
@@ -198,7 +192,6 @@
 
   @media (max-width:880px){
     .brand small{display:none}
-    .legend{display:none}
   }
 
   /* ---------- DOCUMENT D'IMPRESSION ---------- */
@@ -276,13 +269,6 @@
   <div class="banner" id="banner"></div>
 
   <div class="scorebadge" id="scorebadge"><small>Affinité totale</small><b id="scoreVal">0</b></div>
-
-  <div class="legend">
-    <div class="row"><span class="dot" style="background:var(--groom)"></span> Côté marié 🤵🏻‍♂️</div>
-    <div class="row"><span class="dot" style="background:var(--bride)"></span> Côté mariée 👰🏻‍♀️</div>
-    <div class="row"><span class="dot" style="background:var(--kids)"></span> Enfants 🍼</div>
-    <div class="row" style="margin-top:6px;color:var(--ink-soft);font-size:11px">🔒 obligatoire · ❤️ couple · 🍼 enfant · 🌩️ séparés</div>
-  </div>
 
   <div id="tablepanel">
     <h4><span id="tpTitle">Table</span><span class="close" id="tpClose">✕</span></h4>
@@ -404,6 +390,14 @@ function byId(id){
   if(id==="M") return state.couple.marie;
   if(id==="F") return state.couple.mariee;
   return state.guests.find(g=>g.id===id);
+}
+/* un enfant = métier « Enfant » ou âge < 15 ans */
+const isChildJob = g => norm(g.job)==="enfant";
+const isChild = g => isChildJob(g) || (g.age!=null && g.age<15);
+const childCount = () => state.guests.filter(isChild).length;
+function gCountText(){
+  const n = state.guests.length, c = childCount();
+  return n+" convive"+(n>1?"s":"") + (c>0 ? " · "+c+" enfant"+(c>1?"s":"") : "");
 }
 const CX = 600, CY = 600;
 
@@ -553,8 +547,8 @@ function optimize(){
 
   let adultPool, kidPool = [];
   if(kidsMode){
-    kidPool   = state.guests.filter(g=>g.age!=null && g.age<15);
-    adultPool = state.guests.filter(g=>!(g.age!=null && g.age<15));
+    kidPool   = state.guests.filter(isChild);
+    adultPool = state.guests.filter(g=>!isChild(g));
   } else {
     adultPool = state.guests.slice();
   }
@@ -899,7 +893,7 @@ document.getElementById("addRow").addEventListener("click", ()=>{
 });
 
 function refreshDatalists(){
-  const jobs=new Set(), hob=new Set();
+  const jobs=new Set(["Enfant"]), hob=new Set();   // « Enfant » proposé d'office
   [...coupleList(), ...state.guests].forEach(g=>{
     if(g.job&&g.job.trim()) jobs.add(g.job.trim());
     [g.h1,g.h2,g.h3].forEach(h=>{ if(h&&h.trim()) hob.add(h.trim()); });
@@ -932,22 +926,26 @@ function renderGrid(){
   fillCoupleInputs();
   const dups = duplicateIds();
   const body=document.getElementById("gridBody"); body.innerHTML="";
-  document.getElementById("gCount").textContent = state.guests.length+" convive"+(state.guests.length>1?"s":"");
+  document.getElementById("gCount").textContent = gCountText();
   const badge=document.getElementById("dupBadge"), btn=document.getElementById("dedupBtn");
   if(dups.size){ badge.style.display=""; badge.textContent=dups.size+" doublon"+(dups.size>1?"s":""); btn.style.display=""; }
   else { badge.style.display="none"; btn.style.display="none"; }
   state.guests.forEach(g=>{
     const isDup = dups.has(g.id);
+    const kid = isChildJob(g);                       // métier = Enfant → pas de hobby
+    const hDis = kid ? "disabled" : "";
+    const hVal = f => kid ? "" : esc(g[f]);
+    const hPh  = kid ? "—" : "";
     const tr=document.createElement("tr");
-    if(isDup) tr.className="is-dup";
+    tr.className = (isDup?"is-dup ":"") + (kid?"is-kid":"");
     tr.innerHTML = `
       <td><button class="side-btn" data-side="${g.side}" data-id="${g.id}">${g.side==="bride"?"👰🏻‍♀️":"🤵🏻‍♂️"}</button></td>
       <td><input data-f="name" data-id="${g.id}" value="${esc(g.name)}" placeholder="Nom Prénom">${isDup?'<span class="dup-tag">doublon</span>':''}</td>
       <td class="age-col"><input data-f="age" data-id="${g.id}" type="number" min="0" max="120" value="${g.age??""}" placeholder="—"></td>
       <td><input data-f="job" data-id="${g.id}" list="dl-jobs" value="${esc(g.job)}" placeholder="Métier"></td>
-      <td><input data-f="h1" data-id="${g.id}" list="dl-hobbies" value="${esc(g.h1)}" placeholder="Hobby 1"></td>
-      <td><input data-f="h2" data-id="${g.id}" list="dl-hobbies" value="${esc(g.h2)}" placeholder="Hobby 2"></td>
-      <td><input data-f="h3" data-id="${g.id}" list="dl-hobbies" value="${esc(g.h3)}" placeholder="Hobby 3"></td>
+      <td><input data-f="h1" data-id="${g.id}" list="dl-hobbies" value="${hVal('h1')}" placeholder="${hPh||'Hobby 1'}" ${hDis}></td>
+      <td><input data-f="h2" data-id="${g.id}" list="dl-hobbies" value="${hVal('h2')}" placeholder="${hPh||'Hobby 2'}" ${hDis}></td>
+      <td><input data-f="h3" data-id="${g.id}" list="dl-hobbies" value="${hVal('h3')}" placeholder="${hPh||'Hobby 3'}" ${hDis}></td>
       <td><button class="row-del" data-id="${g.id}" title="Supprimer">✕</button></td>`;
     body.appendChild(tr);
   });
@@ -984,8 +982,20 @@ document.getElementById("gridBody").addEventListener("input", e=>{
   const f=inp.getAttribute("data-f");
   if(f==="age"){ g.age = inp.value===""?null:clampInt(inp.value,0,120,null); }
   else g[f]=inp.value;
+
+  if(f==="job"){
+    const kid = isChildJob(g);
+    const tr = inp.closest("tr");
+    ["h1","h2","h3"].forEach(hf=>{
+      const hin = tr.querySelector(`input[data-f="${hf}"]`);
+      if(hin){ hin.disabled = kid; if(kid){ g[hf]=""; hin.value=""; } }
+    });
+    tr.classList.toggle("is-kid", kid);
+  }
+  if(f==="age"||f==="job"){
+    document.getElementById("gCount").textContent = gCountText();
+  }
   if(f==="job"||f==="h1"||f==="h2"||f==="h3") refreshDatalists();
-  document.getElementById("gCount").textContent = state.guests.length+" convive"+(state.guests.length>1?"s":"");
   save();
 });
 document.getElementById("gridBody").addEventListener("click", e=>{
@@ -1090,9 +1100,10 @@ document.getElementById("loadFile").addEventListener("change", e=>{
 function buildPrintDoc(){
   const tables = displayTables();
   const total = allGuests().length;
+  const nKids = childCount();
   const dateStr = new Date().toLocaleDateString("fr-FR", { day:"numeric", month:"long", year:"numeric" });
   let h = `<div class="pd-head"><h1>Plan de table</h1>`+
-          `<div class="pd-sub">${total} convives · ${tables.length} tables · ${dateStr}</div></div>`;
+          `<div class="pd-sub">${total} convives${nKids>0?` · ${nKids} enfant${nKids>1?"s":""}`:""} · ${tables.length} tables · ${dateStr}</div></div>`;
   h += `<div class="pd-grid">`;
   tables.forEach(t=>{
     h += `<div class="pd-card${t.isKids?" pd-kids":""}">`+
