@@ -185,9 +185,16 @@
   #settings .body{padding:18px 20px;overflow:auto}
   #settings p.hint{font-size:12px;color:var(--ink-soft);line-height:1.5;margin:0 0 18px}
   .wfield{margin-bottom:16px}
-  .wfield label{display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px}
+  .wfield label{display:flex;justify-content:space-between;align-items:baseline;font-size:13px;margin-bottom:6px}
+  .wfield label small{color:var(--ink-soft);font-weight:400}
   .wfield label b{color:var(--gold-deep)}
   .wfield input[type=range]{width:100%;accent-color:var(--gold)}
+  .wfield{margin-bottom:18px}
+  .spark{display:block;width:100%;height:34px;margin-bottom:6px}
+  .agecurve{display:block;width:100%;height:74px;margin-bottom:6px;background:rgba(184,155,94,.05);border-radius:8px}
+  .wfield .ends{display:flex;justify-content:space-between;font-size:10px;color:var(--ink-soft);margin-top:3px}
+  .sep-h{height:1px;background:var(--line);margin:6px 0 16px}
+  h4.sec{font-family:var(--serif);font-size:18px;margin:0 0 6px}
   .close-x{cursor:pointer;color:var(--ink-soft);font-size:20px;line-height:1}
 
   @media (max-width:880px){
@@ -303,7 +310,7 @@
       <table class="grid">
         <thead>
           <tr>
-            <th>Côté</th><th>Nom Prénom</th><th>Âge</th><th>Métier</th>
+            <th>Côté</th><th>Nom Prénom</th><th>Âge</th><th title="Indice de sociabilité 0–10">Socia.</th><th>Métier</th>
             <th>Hobby 1</th><th>Hobby 2</th><th>Hobby 3</th><th></th>
           </tr>
         </thead>
@@ -321,12 +328,38 @@
   <aside id="settings">
     <h3>Affinités <span class="close-x" id="closeSettings">✕</span></h3>
     <div class="body">
-      <p class="hint">Plus un critère pèse, plus l'algorithme cherchera à réunir les convives qui le partagent. L'écart d'âge important applique une pénalité. Le côté marié/mariée n'influence pas le placement.</p>
-      <div class="wfield"><label>Même métier <b id="wjobV">+3</b></label><input type="range" id="wjob" min="0" max="8" step="1" value="3"></div>
-      <div class="wfield"><label>Hobby partagé (par hobby) <b id="whobV">+2</b></label><input type="range" id="whob" min="0" max="6" step="1" value="2"></div>
-      <div class="wfield"><label>Âge proche (≤3 ans) <b id="wacV">+2</b></label><input type="range" id="wac" min="0" max="6" step="1" value="2"></div>
-      <div class="wfield"><label>Âge voisin (≤7 ans) <b id="wamV">+1</b></label><input type="range" id="wam" min="0" max="5" step="1" value="1"></div>
-      <div class="wfield"><label>Pénalité grand écart (&gt;15 ans) <b id="wafV">−1</b></label><input type="range" id="waf" min="-4" max="0" step="1" value="-1"></div>
+      <p class="hint">Chaque critère a un poids. Plus la courbe monte, plus le critère compte pour réunir des convives. Le côté marié/mariée n'influence pas le placement.</p>
+
+      <div class="wfield">
+        <label>Même métier <b id="wjobV">+3</b></label>
+        <svg class="spark" id="sparkjob"></svg>
+        <input type="range" id="wjob" min="0" max="8" step="1" value="3">
+      </div>
+      <div class="wfield">
+        <label>Hobby partagé <small>(par hobby)</small> <b id="whobV">+2</b></label>
+        <svg class="spark" id="sparkhob"></svg>
+        <input type="range" id="whob" min="0" max="6" step="1" value="2">
+      </div>
+
+      <div class="wfield">
+        <label>Âge <b id="wageV">+1</b></label>
+        <svg class="agecurve" id="ageCurve"></svg>
+        <input type="range" id="wage" min="-5" max="5" step="1" value="1">
+        <div class="ends"><span>← Mélanger les âges</span><span>Regrouper par âge →</span></div>
+      </div>
+
+      <div class="sep-h"></div>
+      <h4 class="sec">Sociabilité</h4>
+      <p class="hint">Chaque convive a un indice de 0 (réservé) à 10 (très sociable). L'algorithme rapproche la moyenne de chaque table de la cible.</p>
+      <div class="wfield">
+        <label>Sociabilité moyenne visée <b id="wstgtV">5</b></label>
+        <input type="range" id="wstgt" min="0" max="10" step="1" value="5">
+      </div>
+      <div class="wfield">
+        <label>Importance de la sociabilité <b id="wsocV">5</b></label>
+        <svg class="spark" id="sparksoc"></svg>
+        <input type="range" id="wsoc" min="0" max="10" step="1" value="5">
+      </div>
     </div>
   </aside>
 </main>
@@ -345,12 +378,24 @@ function freshCouple(){
     mariee: { id:"F", role:"mariee", side:"bride", name:"", age:null, job:"", h1:"", h2:"", h3:"" }
   };
 }
+const DEFAULT_WEIGHTS = { job:3, hobby:2, age:1, socia:5, sociaTarget:5 };
+function normWeights(w){
+  w = w || {};
+  const num=(v,d)=> (typeof v==="number" && !isNaN(v)) ? v : d;
+  return {
+    job:         num(w.job,         DEFAULT_WEIGHTS.job),
+    hobby:       num(w.hobby,       DEFAULT_WEIGHTS.hobby),
+    age:         num(w.age,         DEFAULT_WEIGHTS.age),
+    socia:       num(w.socia,       DEFAULT_WEIGHTS.socia),
+    sociaTarget: num(w.sociaTarget, DEFAULT_WEIGHTS.sociaTarget)
+  };
+}
 let state = {
   config:  { tables:6, seats:8, kids:false },
   couple:  freshCouple(),   // les mariés (ids fixes "M" / "F"), toujours à la même table
-  guests:  [],          // {id, side, name, age|null, job, h1, h2, h3}
-  links:   [],          // {id, a, b, type:'lock'|'couple'|'baby'}
-  weights: { job:3, hobby:2, ageClose:2, ageMid:1, ageFar:-1 },
+  guests:  [],          // {id, side, name, age|null, job, h1, h2, h3, socia}
+  links:   [],          // {id, a, b, type:'lock'|'couple'|'baby'|'storm'}
+  weights: { ...DEFAULT_WEIGHTS },
   assignment:{},        // guestId -> tableId
   tables:  []           // [{id,label,isKids,capacity,members:[guestId]}]
 };
@@ -379,6 +424,7 @@ function load(){
     if(o && o.state){ state = o.state; uid = o.uid||1;
       state.assignment = state.assignment||{}; state.tables = state.tables||[];
       if(!state.couple) state.couple = freshCouple();
+      state.weights = normWeights(state.weights);
       return true; }
   }catch(e){}
   return false;
@@ -414,20 +460,36 @@ function toast(msg, warns){
 }
 
 /* ============ AFFINITÉ ============ */
+const sociaOf = g => (g && g.socia!=null) ? g.socia : 5;
+
 function aff(a,b){
   const W = state.weights; let s = 0;
   if(a.job && b.job && norm(a.job)===norm(b.job)) s += W.job;
   const hb = new Set([b.h1,b.h2,b.h3].filter(Boolean).map(norm));
   [a.h1,a.h2,a.h3].filter(Boolean).map(norm).forEach(h=>{ if(hb.has(h)) s += W.hobby; });
-  if(a.age!=null && b.age!=null){
+  if(a.age!=null && b.age!=null && W.age){
     const d = Math.abs(a.age-b.age);
-    if(d<=3) s += W.ageClose; else if(d<=7) s += W.ageMid; else if(d>15) s += W.ageFar;
+    const sim = Math.max(-1, Math.min(1, 1 - d/15));   // +1 identique, 0 à 15 ans, -1 à ≥30
+    s += W.age * sim;                                   // age>0 : regrouper · age<0 : mélanger
   }
   return s;
 }
+
+/* pénalité d'écart à la sociabilité moyenne visée (par table) */
+function sociaPenalty(table){
+  const W = state.weights;
+  if(!W.socia || table.length===0) return 0;
+  let sum=0; for(const g of table) sum += sociaOf(g);
+  const dev = (sum/table.length) - W.sociaTarget;
+  return W.socia * dev * dev;
+}
+
 function tablesScore(tables){
   let s=0;
-  for(const t of tables) for(let i=0;i<t.length;i++) for(let j=i+1;j<t.length;j++) s+=aff(t[i],t[j]);
+  for(const t of tables){
+    for(let i=0;i<t.length;i++) for(let j=i+1;j<t.length;j++) s += aff(t[i],t[j]);
+    s -= sociaPenalty(t);
+  }
   return s;
 }
 
@@ -595,7 +657,7 @@ function optimize(){
     warnings.push(`${stormUnmet} lien(s) 🌩️ non respecté(s) : trop de contraintes pour le nombre de tables, ou en conflit avec un 🔒/❤️.`);
   }
 
-  const score = tablesScore([...adultRes.tables, ...(kidRes?kidRes.tables:[])]);
+  const score = Math.round(tablesScore([...adultRes.tables, ...(kidRes?kidRes.tables:[])]));
   document.getElementById("scoreVal").textContent = score;
   document.getElementById("scorebadge").classList.add("show");
 
@@ -886,7 +948,7 @@ document.getElementById("openGuests").addEventListener("click", openGuests);
 document.getElementById("closeGuests").addEventListener("click", closeGuests);
 
 document.getElementById("addRow").addEventListener("click", ()=>{
-  state.guests.push({ id:newId(), side:"groom", name:"", age:null, job:"", h1:"", h2:"", h3:"" });
+  state.guests.push({ id:newId(), side:"groom", name:"", age:null, job:"", h1:"", h2:"", h3:"", socia:5 });
   save(); renderGrid();
   const body=document.getElementById("gridBody");
   body.lastElementChild?.querySelector('input[data-f=name]')?.focus();
@@ -942,6 +1004,7 @@ function renderGrid(){
       <td><button class="side-btn" data-side="${g.side}" data-id="${g.id}">${g.side==="bride"?"👰🏻‍♀️":"🤵🏻‍♂️"}</button></td>
       <td><input data-f="name" data-id="${g.id}" value="${esc(g.name)}" placeholder="Nom Prénom">${isDup?'<span class="dup-tag">doublon</span>':''}</td>
       <td class="age-col"><input data-f="age" data-id="${g.id}" type="number" min="0" max="120" value="${g.age??""}" placeholder="—"></td>
+      <td class="age-col"><input data-f="socia" data-id="${g.id}" type="number" min="0" max="10" value="${g.socia??5}" title="0 = très réservé · 10 = très sociable"></td>
       <td><input data-f="job" data-id="${g.id}" list="dl-jobs" value="${esc(g.job)}" placeholder="Métier"></td>
       <td><input data-f="h1" data-id="${g.id}" list="dl-hobbies" value="${hVal('h1')}" placeholder="${hPh||'Hobby 1'}" ${hDis}></td>
       <td><input data-f="h2" data-id="${g.id}" list="dl-hobbies" value="${hVal('h2')}" placeholder="${hPh||'Hobby 2'}" ${hDis}></td>
@@ -981,6 +1044,7 @@ document.getElementById("gridBody").addEventListener("input", e=>{
   const g=byId(inp.getAttribute("data-id")); if(!g) return;
   const f=inp.getAttribute("data-f");
   if(f==="age"){ g.age = inp.value===""?null:clampInt(inp.value,0,120,null); }
+  else if(f==="socia"){ g.socia = inp.value===""?5:clampInt(inp.value,0,10,5); }
   else g[f]=inp.value;
 
   if(f==="job"){
@@ -1017,15 +1081,58 @@ document.getElementById("gridBody").addEventListener("click", e=>{
   }
 });
 
-/* ============ RÉGLAGES (poids) ============ */
-const wmap = { wjob:"job", whob:"hobby", wac:"ageClose", wam:"ageMid", waf:"ageFar" };
+/* ============ RÉGLAGES (poids + courbes) ============ */
+const wmap = { wjob:"job", whob:"hobby", wage:"age", wsoc:"socia", wstgt:"sociaTarget" };
+const NSV = "http://www.w3.org/2000/svg";
+
+function drawSpark(id, value, max){
+  const svg=document.getElementById(id); if(!svg) return;
+  const w=200, h=34, frac=Math.max(0,Math.min(1, value/max));
+  const top = h-2 - frac*(h-4);
+  svg.setAttribute("viewBox",`0 0 ${w} ${h}`);
+  const d=`M0 ${h-2} Q ${w*0.5} ${h-2} ${w} ${top}`;
+  svg.innerHTML =
+    `<path d="${d} L ${w} ${h} L 0 ${h} Z" fill="rgba(184,155,94,.14)"/>`+
+    `<path d="${d}" fill="none" stroke="var(--gold)" stroke-width="2.4" stroke-linecap="round"/>`;
+}
+function drawAgeCurve(){
+  const svg=document.getElementById("ageCurve"); if(!svg) return;
+  const w=200, h=74, mid=h/2, maxMag=5, wage=state.weights.age;
+  const pts=[];
+  for(let d=0; d<=30; d+=1){
+    const sim=Math.max(-1,Math.min(1,1-d/15));
+    const val=wage*sim;
+    const x=d/30*w;
+    const y=mid - (val/maxMag)*(mid-8);
+    pts.push(x.toFixed(1)+","+y.toFixed(1));
+  }
+  svg.setAttribute("viewBox",`0 0 ${w} ${h}`);
+  svg.innerHTML =
+    `<line x1="0" y1="${mid}" x2="${w}" y2="${mid}" stroke="var(--line)" stroke-width="1" stroke-dasharray="3 3"/>`+
+    `<polyline points="${pts.join(" ")}" fill="none" stroke="var(--gold)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>`+
+    `<text x="3" y="11" font-size="9" fill="var(--ink-soft)">affinité</text>`+
+    `<text x="${w-3}" y="${h-4}" font-size="9" text-anchor="end" fill="var(--ink-soft)">écart d'âge max →</text>`;
+}
 function refreshWeightLabels(){
   const fmt=v=>(v>0?"+":"")+v;
   document.getElementById("wjobV").textContent=fmt(state.weights.job);
   document.getElementById("whobV").textContent=fmt(state.weights.hobby);
-  document.getElementById("wacV").textContent=fmt(state.weights.ageClose);
-  document.getElementById("wamV").textContent=fmt(state.weights.ageMid);
-  document.getElementById("wafV").textContent=fmt(state.weights.ageFar);
+  const ageLbl = state.weights.age>0 ? fmt(state.weights.age)+" · regrouper"
+               : state.weights.age<0 ? fmt(state.weights.age)+" · mélanger" : "0 · neutre";
+  document.getElementById("wageV").textContent=ageLbl;
+  document.getElementById("wsocV").textContent=state.weights.socia;
+  document.getElementById("wstgtV").textContent=state.weights.sociaTarget;
+  drawSpark("sparkjob", state.weights.job, 8);
+  drawSpark("sparkhob", state.weights.hobby, 6);
+  drawSpark("sparksoc", state.weights.socia, 10);
+  drawAgeCurve();
+}
+function applyWeightsToInputs(){
+  document.getElementById("wjob").value  = state.weights.job;
+  document.getElementById("whob").value  = state.weights.hobby;
+  document.getElementById("wage").value  = state.weights.age;
+  document.getElementById("wsoc").value  = state.weights.socia;
+  document.getElementById("wstgt").value = state.weights.sociaTarget;
 }
 Object.keys(wmap).forEach(id=>{
   document.getElementById(id).addEventListener("input", e=>{
@@ -1040,7 +1147,7 @@ document.getElementById("closeSettings").addEventListener("click", ()=>document.
 document.getElementById("resetAll").addEventListener("click", ()=>{
   if(!confirm("Tout réinitialiser (convives, liens, plan) ?")) return;
   state = { config:{tables:6,seats:8,kids:false}, couple:freshCouple(), guests:[], links:[],
-    weights:{job:3,hobby:2,ageClose:2,ageMid:1,ageFar:-1}, assignment:{}, tables:[] };
+    weights:{ ...DEFAULT_WEIGHTS }, assignment:{}, tables:[] };
   uid=1; linkMode=null; linkFirst=null;
   document.querySelectorAll(".linktool .lt").forEach(x=>x.classList.remove("active"));
   document.getElementById("banner").classList.remove("show");
@@ -1078,7 +1185,7 @@ document.getElementById("loadFile").addEventListener("change", e=>{
       state.links      = state.links || [];
       state.assignment = state.assignment || {};
       state.tables     = state.tables || [];
-      state.weights    = state.weights || { job:3, hobby:2, ageClose:2, ageMid:1, ageFar:-1 };
+      state.weights    = normWeights(state.weights);
       if(!state.couple) state.couple = freshCouple();
       // garantir des ids uniques pour la suite
       let maxN = 0; state.guests.forEach(g=>{ const m=/(\d+)/.exec(g.id||""); if(m) maxN=Math.max(maxN,+m[1]); });
@@ -1135,13 +1242,13 @@ function applyConfigToInputs(){
   document.getElementById("cfgTables").value = state.config.tables;
   document.getElementById("cfgSeats").value  = state.config.seats;
   document.getElementById("cfgKids").checked = state.config.kids;
-  ["wjob","whob","wac","wam","waf"].forEach(id=>{ document.getElementById(id).value = state.weights[wmap[id]]; });
+  applyWeightsToInputs();
 }
 load();
 applyConfigToInputs();
 refreshWeightLabels();
 render();
-if(state.tables.length){ document.getElementById("scoreVal").textContent = tablesScore(displayTables().map(t=>t.members.map(byId).filter(Boolean))); document.getElementById("scorebadge").classList.add("show"); }
+if(state.tables.length){ document.getElementById("scoreVal").textContent = Math.round(tablesScore(displayTables().map(t=>t.members.map(byId).filter(Boolean)))); document.getElementById("scorebadge").classList.add("show"); }
 </script>
 </body>
 </html>
