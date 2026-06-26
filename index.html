@@ -72,10 +72,23 @@
   }
   .linktool .lt:hover{background:var(--ivory-2)}
   .linktool .lt.active{border-color:var(--gold);background:#fff;box-shadow:0 0 0 3px rgba(184,155,94,.18)}
+  .linktool #pinBtn.active{border-color:#2B8A85;box-shadow:0 0 0 3px rgba(43,138,133,.18)}
   .lt-label{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-soft);padding-left:4px}
+  .lt-div{width:1px;height:24px;background:var(--line);margin:0 2px}
 
-  .icon-btn{width:38px;height:38px;border-radius:50%;border:1px solid var(--line);background:#fff;display:grid;place-items:center;font-size:16px}
-  .icon-btn:hover{border-color:var(--gold)}
+  .icon-btn{width:38px;height:38px;border-radius:50%;border:1px solid var(--line);background:#fff;display:grid;place-items:center;font-size:16px;color:var(--ink);transition:.15s}
+  .icon-btn:hover{border-color:var(--gold);box-shadow:0 2px 10px rgba(184,155,94,.18)}
+  .icon-btn:disabled{opacity:.35;cursor:default;border-color:var(--line);box-shadow:none}
+  #undoBtn,#redoBtn{font-size:19px;line-height:1}
+
+  .menu-wrap{position:relative;display:inline-block}
+  .menu{position:absolute;top:46px;right:0;z-index:40;min-width:178px;padding:6px;
+    background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 12px 34px rgba(60,40,20,.18);
+    display:flex;flex-direction:column;gap:2px}
+  .menu[hidden]{display:none}
+  .menu button{appearance:none;border:0;background:transparent;text-align:left;padding:9px 12px;border-radius:9px;
+    font-size:13px;color:var(--ink);display:flex;align-items:center;gap:8px;white-space:nowrap}
+  .menu button:hover{background:var(--ivory-2)}
 
   /* ---------- STAGE ---------- */
   main{flex:1 1 auto;position:relative;overflow:hidden}
@@ -248,28 +261,38 @@
 
   <div class="sep"></div>
 
-  <button class="btn ghost" id="openGuests">👥&nbsp;Ajouter des convives</button>
+  <button class="btn ghost" id="openGuests">👥&nbsp;Convives</button>
 
-  <div class="linktool" title="Outil de lien : choisir un type puis cliquer deux convives">
+  <div class="linktool" title="Outils : lier des convives, ou placer un convive à une table">
     <span class="lt-label">Lier</span>
     <button class="lt" data-link="lock"   title="Même table (obligatoire)">🔒</button>
     <button class="lt" data-link="couple" title="Couple → même table, côte à côte">❤️</button>
     <button class="lt" data-link="baby"   title="Même table sauf si table d'enfant">🍼</button>
     <button class="lt" data-link="storm"  title="Jamais à la même table">🌩️</button>
+    <span class="lt-div"></span>
+    <button class="lt" id="pinBtn" title="Placer : cliquez un convive puis une table">🪑</button>
   </div>
-
-  <button class="btn ghost" id="pinBtn" title="Épingler un convive à une table : cliquez le convive puis la table">🪑&nbsp;Placer</button>
 
   <div class="spacer"></div>
 
-  <button class="btn ghost" id="saveBtn" title="Exporter le projet en JSON">💾&nbsp;Save</button>
-  <button class="btn ghost" id="loadBtn" title="Importer un projet JSON">📂&nbsp;Load</button>
-  <button class="btn ghost" id="printBtn" title="Imprimer / Enregistrer en PDF">🖨️&nbsp;Print</button>
-  <input type="file" id="loadFile" accept="application/json,.json" style="display:none">
+  <button class="icon-btn" id="undoBtn" title="Annuler la dernière action" disabled>↶</button>
+  <button class="icon-btn" id="redoBtn" title="Rétablir l'action annulée" disabled>↷</button>
   <div class="sep"></div>
 
+  <button class="icon-btn" id="saveBtn" title="Exporter le projet (JSON)">💾</button>
+  <button class="icon-btn" id="loadBtn" title="Importer un projet (JSON)">📂</button>
+  <button class="icon-btn" id="printBtn" title="Imprimer / Enregistrer en PDF">🖨️</button>
+  <input type="file" id="loadFile" accept="application/json,.json" style="display:none">
   <button class="icon-btn" id="openSettings" title="Réglages d'affinité">⚙️</button>
-  <button class="icon-btn" id="resetAll" title="Tout réinitialiser">🗑️</button>
+
+  <div class="menu-wrap">
+    <button class="icon-btn" id="clearBtn" title="Effacer…">🗑️</button>
+    <div class="menu" id="clearMenu" hidden>
+      <button type="button" data-clear="all">🧹&nbsp;Tout effacer</button>
+      <button type="button" data-clear="links">🔗&nbsp;Effacer les liens</button>
+    </div>
+  </div>
+
   <button class="btn primary" id="seatBtn">À&nbsp;TABLE&nbsp;!</button>
 </header>
 
@@ -503,7 +526,53 @@ let pinFirst = null;     // convive sélectionné pour épingler
 /* ============ PERSISTANCE ============ */
 function save(){
   try{ localStorage.setItem(LS_KEY, JSON.stringify({state,uid})); }catch(e){}
+  if(!applyingHistory) recordDebounced();
 }
+
+/* ============ HISTORIQUE (annuler / rétablir) ============ */
+let history = [], hpos = -1, histTimer = null, applyingHistory = false;
+function histSnapshot(){
+  return JSON.stringify({ config:state.config, couple:state.couple, guests:state.guests,
+    links:state.links, weights:state.weights, assignment:state.assignment, tables:state.tables, pins:state.pins });
+}
+function historyInit(){ history=[histSnapshot()]; hpos=0; updateUndoButtons(); }
+function record(){
+  clearTimeout(histTimer);
+  const snap = histSnapshot();
+  if(history[hpos] === snap) return;                 // rien de neuf
+  history = history.slice(0, hpos+1);                // on jette la branche « rétablir »
+  history.push(snap);
+  if(history.length > 60) history.shift();
+  hpos = history.length - 1;
+  updateUndoButtons();
+}
+function recordDebounced(){ clearTimeout(histTimer); histTimer = setTimeout(record, 450); }
+function applyHistory(){
+  const o = JSON.parse(history[hpos]);
+  state.config=o.config; state.couple=o.couple; state.guests=o.guests; state.links=o.links;
+  state.weights=o.weights; state.assignment=o.assignment; state.tables=o.tables; state.pins=o.pins;
+  applyingHistory = true;
+  save();
+  applyConfigToInputs(); refreshWeightLabels(); fillCoupleInputs();
+  render();
+  if(document.getElementById("guests").classList.contains("show")) renderGrid();
+  document.getElementById("scorebadge").classList.toggle("show", state.tables.length>0);
+  applyingHistory = false;
+  updateUndoButtons();
+}
+function undoAction(){ if(hpos>0){ clearTimeout(histTimer); hpos--; applyHistory(); } }
+function redoAction(){ if(hpos<history.length-1){ clearTimeout(histTimer); hpos++; applyHistory(); } }
+function updateUndoButtons(){
+  const u=document.getElementById("undoBtn"), r=document.getElementById("redoBtn");
+  if(u) u.disabled = hpos<=0;
+  if(r) r.disabled = hpos>=history.length-1;
+}
+document.getElementById("undoBtn").addEventListener("click", undoAction);
+document.getElementById("redoBtn").addEventListener("click", redoAction);
+document.addEventListener("keydown", e=>{
+  if((e.ctrlKey||e.metaKey) && !e.shiftKey && e.key.toLowerCase()==="z"){ e.preventDefault(); undoAction(); }
+  else if((e.ctrlKey||e.metaKey) && (e.key.toLowerCase()==="y" || (e.shiftKey && e.key.toLowerCase()==="z"))){ e.preventDefault(); redoAction(); }
+});
 function load(){
   try{
     const raw = localStorage.getItem(LS_KEY);
@@ -1093,12 +1162,12 @@ function hideTablePanel(){ document.getElementById("tablepanel").classList.remov
 document.getElementById("tpClose").addEventListener("click", hideTablePanel);
 
 /* ============ OUTIL DE LIEN (header) ============ */
-document.querySelectorAll(".linktool .lt").forEach(b=>{
+document.querySelectorAll(".linktool [data-link]").forEach(b=>{
   b.addEventListener("click", ()=>{
     const type = b.getAttribute("data-link");
     if(linkMode===type){ linkMode=null; linkFirst=null; }
     else { linkMode=type; linkFirst=null; pinMode=false; pinFirst=null; document.getElementById("pinBtn").classList.remove("active"); }
-    document.querySelectorAll(".linktool .lt").forEach(x=>x.classList.toggle("active", x.getAttribute("data-link")===linkMode));
+    document.querySelectorAll(".linktool [data-link]").forEach(x=>x.classList.toggle("active", x.getAttribute("data-link")===linkMode));
     const banner=document.getElementById("banner");
     const lbl={lock:"🔒 même table obligatoire",couple:"❤️ couple",baby:"🍼 même table sauf table d'enfant",storm:"🌩️ jamais à la même table"};
     if(linkMode){ banner.innerHTML="<b>Mode lien — "+lbl[linkMode]+"</b> · cliquez deux convives"; banner.classList.add("show"); }
@@ -1110,7 +1179,7 @@ document.querySelectorAll(".linktool .lt").forEach(b=>{
 /* ============ OUTIL ÉPINGLE 🪑 (header) ============ */
 document.getElementById("pinBtn").addEventListener("click", ()=>{
   pinMode = !pinMode; pinFirst=null;
-  if(pinMode){ linkMode=null; linkFirst=null; document.querySelectorAll(".linktool .lt").forEach(x=>x.classList.remove("active")); }
+  if(pinMode){ linkMode=null; linkFirst=null; document.querySelectorAll(".linktool [data-link]").forEach(x=>x.classList.remove("active")); }
   document.getElementById("pinBtn").classList.toggle("active", pinMode);
   const banner=document.getElementById("banner");
   if(pinMode){ banner.innerHTML="<b>Mode placement 🪑</b> · cliquez un convive puis une table (re-cliquez le convive pour retirer)"; banner.classList.add("show"); }
@@ -1339,18 +1408,39 @@ Object.keys(wmap).forEach(id=>{
 document.getElementById("openSettings").addEventListener("click", ()=>document.getElementById("settings").classList.add("show"));
 document.getElementById("closeSettings").addEventListener("click", ()=>document.getElementById("settings").classList.remove("show"));
 
-/* ============ RESET ============ */
-document.getElementById("resetAll").addEventListener("click", ()=>{
-  if(!confirm("Tout réinitialiser (convives, liens, plan) ?")) return;
+/* ============ MENU EFFACER ============ */
+const clearMenu = document.getElementById("clearMenu");
+document.getElementById("clearBtn").addEventListener("click", (e)=>{
+  e.stopPropagation();
+  clearMenu.hidden = !clearMenu.hidden;
+});
+document.addEventListener("click", ()=>{ clearMenu.hidden = true; });   // ferme au clic ailleurs
+clearMenu.addEventListener("click", (e)=>e.stopPropagation());
+
+clearMenu.querySelector('[data-clear="all"]').addEventListener("click", ()=>{
+  clearMenu.hidden = true;
+  if(!confirm("Tout effacer (convives, liens, plan) ?")) return;
   state = { config:{tables:6,seats:8,kids:false}, couple:freshCouple(), guests:[], links:[],
     weights:{ ...DEFAULT_WEIGHTS }, assignment:{}, tables:[], pins:{} };
   uid=1; linkMode=null; linkFirst=null; pinMode=false; pinFirst=null;
-  document.querySelectorAll(".linktool .lt").forEach(x=>x.classList.remove("active"));
+  document.querySelectorAll(".linktool [data-link]").forEach(x=>x.classList.remove("active"));
   document.getElementById("pinBtn").classList.remove("active");
   document.getElementById("banner").classList.remove("show");
   document.getElementById("scorebadge").classList.remove("show");
   fillCoupleInputs();
   applyConfigToInputs(); refreshWeightLabels(); save(); render();
+});
+
+clearMenu.querySelector('[data-clear="links"]').addEventListener("click", ()=>{
+  clearMenu.hidden = true;
+  if(!state.links.length){ toast("Aucun lien à effacer."); return; }
+  if(!confirm("Effacer tous les liens ? (les convives et le plan sont conservés)")) return;
+  state.links = [];
+  linkMode=null; linkFirst=null;
+  document.querySelectorAll(".linktool [data-link]").forEach(x=>x.classList.remove("active"));
+  document.getElementById("banner").classList.remove("show");
+  save(); render();
+  toast("Liens effacés.");
 });
 
 document.getElementById("seatBtn").addEventListener("click", optimize);
@@ -1381,11 +1471,12 @@ document.getElementById("loadFile").addEventListener("change", e=>{
       state = sanitizeState(s);               // normalise tout : pins, socia, liens, tables…
       uid   = Math.max(o.uid || 1, maxIdNum());
       linkMode=null; linkFirst=null; pinMode=false; pinFirst=null;
-      document.querySelectorAll(".linktool .lt").forEach(x=>x.classList.remove("active"));
+      document.querySelectorAll(".linktool [data-link]").forEach(x=>x.classList.remove("active"));
       document.getElementById("pinBtn").classList.remove("active");
       document.getElementById("banner").classList.remove("show");
       applyConfigToInputs(); refreshWeightLabels(); fillCoupleInputs(); save(); render();
       document.getElementById("scorebadge").classList.toggle("show", state.tables.length>0);
+      historyInit();
       toast("Projet chargé · "+state.guests.length+" convives.");
     }catch(err){
       toast("Fichier JSON invalide ou incompatible.");
@@ -1440,6 +1531,7 @@ applyConfigToInputs();
 refreshWeightLabels();
 render();
 if(state.tables.length){ document.getElementById("scoreVal").textContent = Math.round(tablesScore(displayTables().map(t=>t.members.map(byId).filter(Boolean)))); document.getElementById("scorebadge").classList.add("show"); }
+historyInit();
 </script>
 </body>
 </html>
