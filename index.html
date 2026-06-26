@@ -111,6 +111,31 @@
   .scorebadge.show{display:block}
   .scorebadge b{font-family:var(--serif);font-size:22px;color:var(--gold-deep);display:block;line-height:1.1}
 
+  /* contrôle de zoom (bas-droite du plan) */
+  .zoomctl{
+    position:absolute;right:18px;bottom:18px;z-index:18;
+    display:flex;flex-direction:column;align-items:center;gap:6px;
+    background:rgba(255,255,255,.92);border:1px solid var(--line);border-radius:14px;
+    padding:8px 6px;box-shadow:var(--shadow)
+  }
+  .zoom-btn{
+    width:34px;height:34px;border-radius:9px;border:1px solid var(--line);background:#fff;
+    font-size:17px;line-height:1;display:grid;place-items:center;color:var(--ink);transition:.15s
+  }
+  .zoom-btn:hover{border-color:var(--gold);box-shadow:0 2px 8px rgba(184,155,94,.18)}
+  .zoom-label{font-size:11px;color:var(--ink-soft);font-variant-numeric:tabular-nums}
+
+  /* curseur de rotation de la roue (apparaît en zoom) */
+  .rotwrap{
+    position:absolute;left:50%;bottom:18px;transform:translateX(-50%);z-index:18;
+    display:none;align-items:center;gap:10px;
+    background:rgba(255,255,255,.92);border:1px solid var(--line);border-radius:999px;
+    padding:8px 16px;box-shadow:var(--shadow)
+  }
+  .rotwrap.show{display:flex}
+  .rot-ico{font-size:15px}
+  #rotSlider{width:240px;accent-color:var(--gold-deep)}
+
   /* toast */
   #toast{
     position:absolute;bottom:18px;left:50%;transform:translateX(-50%) translateY(20px);
@@ -298,6 +323,18 @@
 
 <main>
   <svg id="stage" viewBox="-210 -210 1620 1620" preserveAspectRatio="xMidYMid meet"></svg>
+
+  <div class="zoomctl">
+    <button class="zoom-btn" id="zoomIn"  title="Zoomer">＋</button>
+    <span class="zoom-label" id="zoomLabel">100%</span>
+    <button class="zoom-btn" id="zoomOut" title="Dézoomer">－</button>
+    <button class="zoom-btn" id="zoomReset" title="Vue d'ensemble">⤢</button>
+  </div>
+
+  <div class="rotwrap" id="rotwrap">
+    <span class="rot-ico" title="Faire tourner la roue des noms">🔄</span>
+    <input id="rotSlider" type="range" min="0" max="360" value="0" title="Faire tourner la roue des noms">
+  </div>
 
   <div class="banner" id="banner"></div>
 
@@ -603,6 +640,9 @@ function gCountText(){
   return n+" convive"+(n>1?"s":"") + (c>0 ? " · "+c+" enfant"+(c>1?"s":"") : "");
 }
 const CX = 600, CY = 600;
+const ZMAX = 4.5;
+let view = { zoom:1, rot:0 };   // zoom caméra + rotation de la roue des noms
+let lastFIT = 640;              // demi-taille du cadrage plein calculé au dernier rendu
 
 function toast(msg, warns){
   const t = document.getElementById("toast");
@@ -922,6 +962,7 @@ function render(){
   svg.innerHTML = "";
   const tables = displayTables();
   const ang = sideAngles();
+  if(view.rot) Object.keys(ang).forEach(k=> ang[k] += view.rot);   // rotation de la roue des noms
 
   /* positions des tables sur un anneau central */
   const n = tables.length;
@@ -1078,11 +1119,38 @@ function render(){
     svg.appendChild(grp);
   });
 
-  /* cadrage automatique : englobe le couloir de lien le plus extérieur */
-  const FIT = Math.max(maxLaneR + 18, 640) + 24;
-  svg.setAttribute("viewBox", `${(CX-FIT).toFixed(0)} ${(CY-FIT).toFixed(0)} ${(2*FIT).toFixed(0)} ${(2*FIT).toFixed(0)}`);
+  /* cadrage : englobe le couloir de lien le plus extérieur, puis applique zoom/rotation */
+  lastFIT = Math.max(maxLaneR + 18, 640) + 24;
+  applyView();
 
   document.getElementById("scorebadge").classList.toggle("show", state.tables.length>0);
+}
+
+/* ============ ZOOM / ROTATION DE LA ROUE ============ */
+function applyView(){
+  const svg = document.getElementById("stage");
+  const z = Math.max(1, Math.min(ZMAX, view.zoom));
+  const half = lastFIT / z;
+  const topEdge = CY - lastFIT;              // sommet du contenu (halo de liens le plus extérieur)
+  const cy = topEdge + half;                 // le bord HAUT reste collé au sommet → on voit tous les liens du dessus
+  const cx = CX;
+  svg.setAttribute("viewBox",
+    `${(cx-half).toFixed(0)} ${(cy-half).toFixed(0)} ${(2*half).toFixed(0)} ${(2*half).toFixed(0)}`);
+  // le curseur de rotation n'apparaît qu'en zoom
+  const rw = document.getElementById("rotwrap");
+  if(rw) rw.classList.toggle("show", z > 1.04);
+  const zl = document.getElementById("zoomLabel");
+  if(zl) zl.textContent = Math.round(z*100) + "%";
+}
+let rotRAF = null;
+function setRotation(deg){
+  view.rot = ((deg % 360) + 360) % 360;
+  if(rotRAF) return;                          // throttle : un rendu par frame max
+  rotRAF = requestAnimationFrame(()=>{ rotRAF=null; render(); });
+}
+function setZoom(z){
+  view.zoom = Math.max(1, Math.min(ZMAX, z));
+  applyView();                                // le zoom ne change que le cadrage → pas de rendu complet
 }
 
 /* ============ INTERACTIONS STAGE ============ */
@@ -1444,6 +1512,18 @@ clearMenu.querySelector('[data-clear="links"]').addEventListener("click", ()=>{
 });
 
 document.getElementById("seatBtn").addEventListener("click", optimize);
+
+/* ============ ZOOM & ROTATION (interactions) ============ */
+document.getElementById("zoomIn").addEventListener("click", ()=> setZoom(view.zoom*1.25));
+document.getElementById("zoomOut").addEventListener("click", ()=> setZoom(view.zoom/1.25));
+document.getElementById("zoomReset").addEventListener("click", ()=>{
+  view.zoom=1; view.rot=0; document.getElementById("rotSlider").value=0; render();
+});
+document.getElementById("stage").addEventListener("wheel", (e)=>{
+  e.preventDefault();
+  setZoom(view.zoom * (e.deltaY<0 ? 1.12 : 1/1.12));
+}, { passive:false });
+document.getElementById("rotSlider").addEventListener("input", (e)=> setRotation(parseFloat(e.target.value)));
 
 /* ============ SAVE / LOAD / PRINT ============ */
 document.getElementById("saveBtn").addEventListener("click", ()=>{
