@@ -63,6 +63,7 @@
     border-color:var(--gold-deep);color:#fff;font-weight:600;letter-spacing:.04em
   }
   .btn.primary:hover{filter:brightness(1.05)}
+  .btn.active{border-color:#2B8A85;color:#1f6b66;background:rgba(43,138,133,.08);box-shadow:0 0 0 3px rgba(43,138,133,.15)}
 
   .linktool{display:flex;gap:6px;align-items:center;padding:5px 8px;border:1px solid var(--line);border-radius:999px;background:#fff}
   .linktool .lt{
@@ -257,6 +258,8 @@
     <button class="lt" data-link="storm"  title="Jamais à la même table">🌩️</button>
   </div>
 
+  <button class="btn ghost" id="pinBtn" title="Épingler un convive à une table : cliquez le convive puis la table">🪑&nbsp;Placer</button>
+
   <div class="spacer"></div>
 
   <button class="btn ghost" id="saveBtn" title="Exporter le projet en JSON">💾&nbsp;Save</button>
@@ -271,7 +274,7 @@
 </header>
 
 <main>
-  <svg id="stage" viewBox="0 0 1200 1200" preserveAspectRatio="xMidYMid meet"></svg>
+  <svg id="stage" viewBox="-210 -210 1620 1620" preserveAspectRatio="xMidYMid meet"></svg>
 
   <div class="banner" id="banner"></div>
 
@@ -390,6 +393,88 @@ function normWeights(w){
     sociaTarget: num(w.sociaTarget, DEFAULT_WEIGHTS.sociaTarget)
   };
 }
+
+/* ============ COMPATIBILITÉ : assainit n'importe quel état importé ============ */
+function asStr(v){ return v==null ? "" : String(v); }
+function asNumOrNull(v,min,max){ if(v==null||v==="") return null; const n=+v; return isFinite(n)?Math.max(min,Math.min(max,Math.round(n))):null; }
+function sanitizeGuest(g){
+  g = g || {};
+  return {
+    id:    g.id ? String(g.id) : ("g"+(uid++)),
+    side:  g.side==="bride" ? "bride" : "groom",
+    name:  asStr(g.name),
+    age:   asNumOrNull(g.age,0,120),
+    job:   asStr(g.job),
+    h1:    asStr(g.h1), h2: asStr(g.h2), h3: asStr(g.h3),
+    socia: (g.socia==null||g.socia==="") ? 5 : Math.max(0,Math.min(10, Math.round(+g.socia)||0))
+  };
+}
+function sanitizeCouple(c){
+  const f = freshCouple();
+  if(c){
+    ["marie","mariee"].forEach(k=>{
+      const src = c[k] || {};
+      f[k].name = asStr(src.name);
+      const a = asNumOrNull(src.age,0,120); if(a!=null) f[k].age=a;
+      if(src.job!=null) f[k].job=asStr(src.job);
+      ["h1","h2","h3"].forEach(h=>{ if(src[h]!=null) f[k][h]=asStr(src[h]); });
+      if(src.socia!=null && isFinite(+src.socia)) f[k].socia=Math.max(0,Math.min(10,+src.socia));
+    });
+  }
+  return f;
+}
+function sanitizeState(raw){
+  const s = (raw && raw.state) ? raw.state : (raw || {});
+  const cfg = s.config || {};
+  const config = {
+    tables: clampInt(cfg.tables, 1, 40, 6),
+    seats:  clampInt(cfg.seats,  2, 20, 8),
+    kids:   !!cfg.kids
+  };
+  const seen = new Set();
+  const guests = (Array.isArray(s.guests)?s.guests:[]).map(sanitizeGuest)
+    .filter(g=>{ if(seen.has(g.id)) return false; seen.add(g.id); return true; });
+  const couple = sanitizeCouple(s.couple);
+  const validIds = new Set([...seen, "M", "F"]);
+
+  const LT = new Set(["lock","couple","baby","storm"]);
+  const linkSeen = new Set();
+  const links = (Array.isArray(s.links)?s.links:[])
+    .filter(l=> l && LT.has(l.type) && validIds.has(l.a) && validIds.has(l.b) && l.a!==l.b)
+    .filter(l=>{ const k=(l.a<l.b?l.a+"|"+l.b:l.b+"|"+l.a); if(linkSeen.has(k)) return false; linkSeen.add(k); return true; })
+    .map((l,i)=>({ id: l.id?String(l.id):("l_"+i), a:l.a, b:l.b, type:l.type }));
+
+  const tables = (Array.isArray(s.tables)?s.tables:[])
+    .filter(t=>t && t.id!=null)
+    .map(t=>({
+      id: String(t.id),
+      label: asStr(t.label) || String(t.id),
+      isKids: !!t.isKids,
+      capacity: clampInt(t.capacity,1,40,config.seats),
+      members: (Array.isArray(t.members)?t.members:[]).filter(id=>validIds.has(id))
+    }));
+  const tableIds = new Set(tables.map(t=>t.id));
+
+  const assignment = {};
+  if(s.assignment && typeof s.assignment==="object"){
+    Object.keys(s.assignment).forEach(gid=>{
+      if(validIds.has(gid)){ const tid=s.assignment[gid]; if(!tableIds.size || tableIds.has(tid)) assignment[gid]=tid; }
+    });
+  }
+  const pins = {};
+  if(s.pins && typeof s.pins==="object"){
+    Object.keys(s.pins).forEach(gid=>{ if(validIds.has(gid) && s.pins[gid]) pins[gid]=String(s.pins[gid]); });
+  }
+
+  return { config, couple, guests, links, weights: normWeights(s.weights), assignment, tables, pins };
+}
+function maxIdNum(){
+  let mx = 0;
+  state.guests.forEach(g=>{ const m=/(\d+)/.exec(g.id||""); if(m) mx=Math.max(mx,+m[1]); });
+  state.links.forEach(l=>{ const m=/(\d+)/.exec(l.id||""); if(m) mx=Math.max(mx,+m[1]); });
+  return mx + 1;
+}
+
 let state = {
   config:  { tables:6, seats:8, kids:false },
   couple:  freshCouple(),   // les mariés (ids fixes "M" / "F"), toujours à la même table
@@ -397,7 +482,8 @@ let state = {
   links:   [],          // {id, a, b, type:'lock'|'couple'|'baby'|'storm'}
   weights: { ...DEFAULT_WEIGHTS },
   assignment:{},        // guestId -> tableId
-  tables:  []           // [{id,label,isKids,capacity,members:[guestId]}]
+  tables:  [],          // [{id,label,isKids,capacity,members:[guestId]}]
+  pins:    {}           // guestId -> tableId (placement forcé manuel 🪑)
 };
 let uid = 1;
 const newId = () => "g"+(uid++);
@@ -409,8 +495,10 @@ function allGuests(){ return [...namedCouple(), ...state.guests]; }
 function gName(g){ return (g && g.role ? "👑 " : "") + ((g && g.name && g.name.trim()) ? g.name.trim() : "(sans nom)"); }
 
 /* link tool runtime */
-let linkMode = null;     // 'lock'|'couple'|'baby'|null
+let linkMode = null;     // 'lock'|'couple'|'baby'|'storm'|null
 let linkFirst = null;    // first selected guest id
+let pinMode = false;     // outil 🪑 actif
+let pinFirst = null;     // convive sélectionné pour épingler
 
 /* ============ PERSISTANCE ============ */
 function save(){
@@ -421,11 +509,11 @@ function load(){
     const raw = localStorage.getItem(LS_KEY);
     if(!raw) return false;
     const o = JSON.parse(raw);
-    if(o && o.state){ state = o.state; uid = o.uid||1;
-      state.assignment = state.assignment||{}; state.tables = state.tables||[];
-      if(!state.couple) state.couple = freshCouple();
-      state.weights = normWeights(state.weights);
-      return true; }
+    if(o && o.state){
+      state = sanitizeState(o.state);
+      uid = Math.max(o.uid||1, maxIdNum());
+      return true;
+    }
   }catch(e){}
   return false;
 }
@@ -601,24 +689,43 @@ function seatPool(pool, links, includeBaby, nTables, seats){
 /* ============ OPTIMISATION GLOBALE ============ */
 function optimize(){
   syncConfig();
+  if(!state.pins) state.pins = {};
   const working = allGuests();
   if(working.length===0){ toast("Aucun convive à placer."); return; }
   const { tables:T, seats:S, kids:kidsMode } = state.config;
   const warnings = [];
   const couple = namedCouple();           // les mariés renseignés = toujours adultes, ensemble
 
+  /* ---- épingles 🪑 : résolues au niveau des groupes liés ---- */
+  const allLinksFull = couple.length===2 ? [...state.links, { id:"__c", a:"M", b:"F", type:"couple" }] : state.links;
+  const fullGroups = buildGroups(working, allLinksFull, !kidsMode);
+  const pinnedIds = new Set();
+  const pinnedGroups = [];                 // {members:[guest], table}
+  fullGroups.forEach(grp=>{
+    let table=null, conflict=false;
+    grp.forEach(g=>{ const p=state.pins[g.id]; if(p){ if(table && table!==p) conflict=true; if(!table) table=p; } });
+    if(table){
+      if(conflict) warnings.push("Épingles 🪑 contradictoires dans un même groupe lié : une seule table retenue.");
+      pinnedGroups.push({ members:grp, table });
+      grp.forEach(g=>pinnedIds.add(g.id));
+    }
+  });
+
+  /* pools SANS les épinglés (placés à part ensuite) */
+  const free = state.guests.filter(g=>!pinnedIds.has(g.id));
   let adultPool, kidPool = [];
   if(kidsMode){
-    kidPool   = state.guests.filter(isChild);
-    adultPool = state.guests.filter(g=>!isChild(g));
+    kidPool   = free.filter(isChild);
+    adultPool = free.filter(g=>!isChild(g));
   } else {
-    adultPool = state.guests.slice();
+    adultPool = free.slice();
   }
-  adultPool = [...couple, ...adultPool];   // les mariés s'asseyent toujours côté adultes
+  const freeCouple = couple.filter(c=>!pinnedIds.has(c.id));
+  adultPool = [...freeCouple, ...adultPool];   // les mariés s'asseyent toujours côté adultes
 
   /* lien implicite et permanent entre le marié et la mariée */
   let adultLinks = state.links;
-  if(couple.length===2) adultLinks = [...state.links, { id:"__couple", a:"M", b:"F", type:"couple" }];
+  if(freeCouple.length===2) adultLinks = [...state.links, { id:"__couple", a:"M", b:"F", type:"couple" }];
 
   const adultRes = seatPool(adultPool, adultLinks, !kidsMode, T, S);
 
@@ -631,18 +738,30 @@ function optimize(){
 
   /* reconstruire les tables + assignation */
   state.tables = []; state.assignment = {};
+  const tableById = {};
   adultRes.tables.forEach((mem,i)=>{
     const id = "T"+(i+1);
-    state.tables.push({ id, label:"Table "+(i+1), isKids:false, capacity:S, members:mem.map(g=>g.id) });
+    const t = { id, label:"Table "+(i+1), isKids:false, capacity:S, members:mem.map(g=>g.id) };
+    state.tables.push(t); tableById[id]=t;
     mem.forEach(g=>state.assignment[g.id]=id);
   });
   if(kidRes){
     kidRes.tables.forEach((mem,i)=>{
       const id = "K"+(i+1);
-      state.tables.push({ id, label: nKid>1?("Enfants "+(i+1)):"Enfants", isKids:true, capacity:S, members:mem.map(g=>g.id) });
+      const t = { id, label: nKid>1?("Enfants "+(i+1)):"Enfants", isKids:true, capacity:S, members:mem.map(g=>g.id) };
+      state.tables.push(t); tableById[id]=t;
       mem.forEach(g=>state.assignment[g.id]=id);
     });
   }
+
+  /* placer les groupes épinglés sur LEUR table */
+  let pinMissing = 0;
+  pinnedGroups.forEach(gp=>{
+    let t = tableById[gp.table];
+    if(!t){ pinMissing++; t = state.tables[0]; }
+    gp.members.forEach(g=>{ if(state.assignment[g.id]===undefined){ t.members.push(g.id); state.assignment[g.id]=t.id; } });
+  });
+  if(pinMissing) warnings.push(`${pinMissing} épingle(s) 🪑 visaient une table inexistante : reportée(s) sur une autre table.`);
 
   /* personne n'est jamais « non placé » : on signale seulement une éventuelle surcapacité */
   const over = state.tables.filter(t=>t.members.length>t.capacity);
@@ -657,7 +776,7 @@ function optimize(){
     warnings.push(`${stormUnmet} lien(s) 🌩️ non respecté(s) : trop de contraintes pour le nombre de tables, ou en conflit avec un 🔒/❤️.`);
   }
 
-  const score = Math.round(tablesScore([...adultRes.tables, ...(kidRes?kidRes.tables:[])]));
+  const score = Math.round(tablesScore(state.tables.map(t=>t.members.map(byId).filter(Boolean))));
   document.getElementById("scoreVal").textContent = score;
   document.getElementById("scorebadge").classList.add("show");
 
@@ -729,6 +848,7 @@ function el(tag, attrs, text){
 }
 
 function render(){
+  if(!state.pins) state.pins = {};
   const svg = document.getElementById("stage");
   svg.innerHTML = "";
   const tables = displayTables();
@@ -781,33 +901,85 @@ function render(){
     svg.appendChild(g);
   });
 
+  /* --- épingles 🪑 : ligne convive → table forcée --- */
+  const PIN="#2B8A85";
+  Object.keys(state.pins || {}).forEach(gid=>{
+    const tid = state.pins[gid]; if(ang[gid]===undefined || !pos[tid]) return;
+    const a = ang[gid]*Math.PI/180;
+    const gx=CX+Rin*Math.cos(a), gy=CY+Rin*Math.sin(a);
+    const mx=(gx+pos[tid].x)/2, my=(gy+pos[tid].y)/2;
+    const grp = el("g",{});
+    grp.appendChild(el("line",{ x1:gx,y1:gy,x2:pos[tid].x,y2:pos[tid].y, stroke:PIN,
+      "stroke-width":2, "stroke-opacity":.55 }));
+    grp.appendChild(el("circle",{ cx:mx, cy:my, r:11, fill:"#fff", stroke:PIN, "stroke-width":1.3 }));
+    grp.appendChild(el("text",{ x:mx, y:my+4, "text-anchor":"middle", "font-size":11 }, "🪑"));
+    svg.appendChild(grp);
+  });
   /* --- liens entre convives --- */
   const linkGlyph = { lock:"🔒", couple:"❤️", baby:"🍼", storm:"🌩️" };
   const linkColor = { couple:"var(--bride)", storm:"#5B6B8C", lock:"var(--gold-deep)", baby:"var(--gold-deep)" };
-  /* géométrie d'un lien : arc bombé vers l'extérieur (dégage les tables),
-     symbole posé exactement au milieu de la courbe (t=0.5) */
-  function linkGeom(idA, idB){
-    if(ang[idA]===undefined || ang[idB]===undefined) return null;
-    const aa=ang[idA]*Math.PI/180, ab=ang[idB]*Math.PI/180;
-    const ax=CX+Rtick*Math.cos(aa), ay=CY+Rtick*Math.sin(aa);
-    const bx=CX+Rtick*Math.cos(ab), by=CY+Rtick*Math.sin(ab);
-    const mx=(ax+bx)/2, my=(ay+by)/2;
-    const dl=Math.hypot(mx-CX,my-CY)||1;
-    const chord=Math.hypot(bx-ax,by-ay);
-    const push=Math.min(120, 22 + chord*0.12);          // bombé vers l'extérieur
-    const cx2=mx+(mx-CX)/dl*push, cy2=my+(my-CY)/dl*push;
-    const hx=(ax+2*cx2+bx)/4, hy=(ay+2*cy2+by)/4;        // point de la courbe à t=0.5
-    return { d:`M ${ax} ${ay} Q ${cx2} ${cy2} ${bx} ${by}`, hx, hy };
+  /* rayon de l'arrière d'un nom (estimé selon sa longueur) pour y accrocher les liens */
+  function nameBackR(g){
+    const isC = !!(g && g.role);
+    const fs = isC ? 16 : 14;
+    const label = (isC?"👑 ":"") + ((g && g.name && g.name.trim()) ? g.name.trim() : "(sans nom)");
+    let w = 0;
+    for(const ch of label){ const c = ch.codePointAt(0); w += (c>0x2190) ? fs*1.05 : fs*0.54; }
+    return Rlbl + w + 10;
   }
-  state.links.forEach(l=>{
-    const geo=linkGeom(l.a,l.b); if(!geo) return;
-    const col = linkColor[l.type] || "var(--gold-deep)";
-    const g = el("g",{ "data-link":l.id, style:"cursor:pointer" });
-    const path = el("path",{ d:geo.d, fill:"none", stroke:col, "stroke-width":1.5, "stroke-opacity":.6 });
-    if(l.type==="storm") path.setAttribute("stroke-dasharray","5 4");   // trait orage en tireté
+  const rp = (deg,R)=>{ const r=deg*Math.PI/180; return [CX+R*Math.cos(r), CY+R*Math.sin(r)]; };
+
+  /* liens à tracer (+ cœur des mariés) */
+  const drawLinks = state.links.slice();
+  if(namedCouple().length===2) drawLinks.push({ id:"__couple", a:"M", b:"F", type:"couple" });
+
+  /* pour chaque lien : arc le plus court + degrés couverts (bins) */
+  const infos = [];
+  drawLinks.forEach(l=>{
+    if(ang[l.a]===undefined || ang[l.b]===undefined) return;
+    const aA=ang[l.a]; let d=ang[l.b]-aA; while(d>180)d-=360; while(d<-180)d+=360;
+    const bins=new Set(); const n=Math.max(1,Math.ceil(Math.abs(d))); const sgn=d>=0?1:-1;
+    for(let i=0;i<=n;i++){ let a=aA + sgn*Math.min(i, Math.abs(d)); a=((Math.round(a)%360)+360)%360; bins.add(a); }
+    infos.push({ l, aA, d, bins, span:Math.abs(d) });
+  });
+
+  /* couloirs : petits arcs à l'intérieur, grands à l'extérieur ; coloration → jamais de superposition */
+  infos.sort((x,y)=> x.span - y.span);
+  const lanes=[];
+  infos.forEach(it=>{
+    let k=0;
+    for(;;){
+      if(!lanes[k]) lanes[k]=new Set();
+      let clash=false; for(const b of it.bins){ if(lanes[k].has(b)){ clash=true; break; } }
+      if(!clash){ it.lane=k; it.bins.forEach(b=>lanes[k].add(b)); break; }
+      k++;
+    }
+  });
+
+  /* rayons des couloirs : espacement UNIFORME, juste derrière le nom le plus long */
+  let maxNameR=0; allGuests().forEach(g=>{ if(ang[g.id]!==undefined) maxNameR=Math.max(maxNameR, nameBackR(g)); });
+  const baseRing = maxNameR + 18, STEP = 22;
+  let maxLaneR = baseRing;
+
+  infos.forEach(it=>{
+    const R = baseRing + it.lane*STEP; maxLaneR=Math.max(maxLaneR, R);
+    const aB = it.aA + it.d;
+    const RA=nameBackR(byId(it.l.a)), RB=nameBackR(byId(it.l.b));
+    const [ax,ay]=rp(it.aA,RA), [a2x,a2y]=rp(it.aA,R);
+    const [b2x,b2y]=rp(aB,R), [bx,by]=rp(aB,RB);
+    const sweep = it.d>0 ? 1 : 0;
+    const dPath=`M ${ax.toFixed(1)} ${ay.toFixed(1)} L ${a2x.toFixed(1)} ${a2y.toFixed(1)} `+
+                `A ${R.toFixed(1)} ${R.toFixed(1)} 0 0 ${sweep} ${b2x.toFixed(1)} ${b2y.toFixed(1)} `+
+                `L ${bx.toFixed(1)} ${by.toFixed(1)}`;
+    const [hx,hy]=rp(it.aA + it.d/2, R);
+    const col = linkColor[it.l.type] || "var(--gold-deep)";
+    const g = el("g",{ "data-link":it.l.id, style:"cursor:pointer" });
+    const path = el("path",{ d:dPath, fill:"none", stroke:col, "stroke-width":1.7, "stroke-opacity":.72,
+      "stroke-linejoin":"round", "stroke-linecap":"round" });
+    if(it.l.type==="storm") path.setAttribute("stroke-dasharray","6 5");
     g.appendChild(path);
-    g.appendChild(el("circle",{ cx:geo.hx, cy:geo.hy, r:13, fill:"#fff", stroke:col, "stroke-width":1.2 }));
-    g.appendChild(el("text",{ x:geo.hx, y:geo.hy+5, "text-anchor":"middle", "font-size":13 }, linkGlyph[l.type]));
+    g.appendChild(el("circle",{ cx:hx, cy:hy, r:13, fill:"#fff", stroke:col, "stroke-width":1.3 }));
+    g.appendChild(el("text",{ x:hx, y:hy+5, "text-anchor":"middle", "font-size":13 }, linkGlyph[it.l.type]));
     svg.appendChild(g);
   });
 
@@ -822,7 +994,7 @@ function render(){
     const lx=CX+Rlbl*Math.cos(a), ly=CY+Rlbl*Math.sin(a);
     let rot = (ang[g.id]), anchor="start";
     if(Math.cos(a)<0){ rot += 180; anchor="end"; }
-    const selected = linkFirst===g.id;
+    const selected = (linkFirst===g.id) || (pinFirst===g.id);
     const grp = el("g",{ "data-guest":g.id, style:"cursor:pointer" });
     grp.appendChild(el("line",{ x1:ix,y1:iy,x2:tx,y2:ty, stroke:col,
       "stroke-width":selected?3:(isCouple?2.6:1.6), "stroke-opacity":selected?1:.85 }));
@@ -837,17 +1009,9 @@ function render(){
     svg.appendChild(grp);
   });
 
-  /* cœur des mariés, posé sur la ligne qui les relie au sommet */
-  if(namedCouple().length===2){
-    const geo = linkGeom("M","F");
-    if(geo){
-      const g = el("g",{});
-      g.appendChild(el("path",{ d:geo.d, fill:"none", stroke:"var(--bride)", "stroke-width":1.7, "stroke-opacity":.65 }));
-      g.appendChild(el("circle",{ cx:geo.hx, cy:geo.hy, r:13, fill:"#fff", stroke:"var(--bride)", "stroke-width":1.3 }));
-      g.appendChild(el("text",{ x:geo.hx, y:geo.hy+5, "text-anchor":"middle", "font-size":14 }, "❤️"));
-      svg.appendChild(g);
-    }
-  }
+  /* cadrage automatique : englobe le couloir de lien le plus extérieur */
+  const FIT = Math.max(maxLaneR + 18, 640) + 24;
+  svg.setAttribute("viewBox", `${(CX-FIT).toFixed(0)} ${(CY-FIT).toFixed(0)} ${(2*FIT).toFixed(0)} ${(2*FIT).toFixed(0)}`);
 
   document.getElementById("scorebadge").classList.toggle("show", state.tables.length>0);
 }
@@ -857,6 +1021,25 @@ document.getElementById("stage").addEventListener("click", e=>{
   const gEl = e.target.closest("[data-guest]");
   const lEl = e.target.closest("[data-link]");
   const tEl = e.target.closest("[data-table]");
+
+  /* mode épingle 🪑 : convive puis table */
+  if(pinMode){
+    if(gEl){
+      const id = gEl.getAttribute("data-guest");
+      if(state.pins[id]){ delete state.pins[id]; pinFirst=null; save(); render(); toast("Épingle retirée."); return; }
+      pinFirst = (pinFirst===id) ? null : id;
+      render(); return;
+    }
+    if(tEl && pinFirst){
+      const tid = tEl.getAttribute("data-table");
+      state.pins[pinFirst] = tid;
+      const who = gName(byId(pinFirst));
+      pinFirst=null; save(); render();
+      toast(`🪑 ${who} épinglé(e) à ${tid}.`);
+      return;
+    }
+    return;
+  }
 
   if(linkMode && gEl){
     const id = gEl.getAttribute("data-guest");
@@ -914,7 +1097,7 @@ document.querySelectorAll(".linktool .lt").forEach(b=>{
   b.addEventListener("click", ()=>{
     const type = b.getAttribute("data-link");
     if(linkMode===type){ linkMode=null; linkFirst=null; }
-    else { linkMode=type; linkFirst=null; }
+    else { linkMode=type; linkFirst=null; pinMode=false; pinFirst=null; document.getElementById("pinBtn").classList.remove("active"); }
     document.querySelectorAll(".linktool .lt").forEach(x=>x.classList.toggle("active", x.getAttribute("data-link")===linkMode));
     const banner=document.getElementById("banner");
     const lbl={lock:"🔒 même table obligatoire",couple:"❤️ couple",baby:"🍼 même table sauf table d'enfant",storm:"🌩️ jamais à la même table"};
@@ -922,6 +1105,17 @@ document.querySelectorAll(".linktool .lt").forEach(b=>{
     else banner.classList.remove("show");
     render();
   });
+});
+
+/* ============ OUTIL ÉPINGLE 🪑 (header) ============ */
+document.getElementById("pinBtn").addEventListener("click", ()=>{
+  pinMode = !pinMode; pinFirst=null;
+  if(pinMode){ linkMode=null; linkFirst=null; document.querySelectorAll(".linktool .lt").forEach(x=>x.classList.remove("active")); }
+  document.getElementById("pinBtn").classList.toggle("active", pinMode);
+  const banner=document.getElementById("banner");
+  if(pinMode){ banner.innerHTML="<b>Mode placement 🪑</b> · cliquez un convive puis une table (re-cliquez le convive pour retirer)"; banner.classList.add("show"); }
+  else banner.classList.remove("show");
+  render();
 });
 
 /* ============ CONFIG HEADER ============ */
@@ -1021,6 +1215,7 @@ function removeDuplicates(){
   state.guests = state.guests.filter(g=>!dups.has(g.id));
   state.links  = state.links.filter(l=>!dups.has(l.a) && !dups.has(l.b));
   dups.forEach(id=>delete state.assignment[id]);
+  dups.forEach(id=>delete state.pins[id]);
   save(); renderGrid(); render();
   toast(dups.size+" doublon(s) supprimé(s).");
 }
@@ -1077,7 +1272,8 @@ document.getElementById("gridBody").addEventListener("click", e=>{
     state.guests = state.guests.filter(x=>x.id!==id);
     state.links  = state.links.filter(l=>l.a!==id && l.b!==id);
     delete state.assignment[id];
-    save(); renderGrid();
+    delete state.pins[id];
+    save(); renderGrid(); render();
   }
 });
 
@@ -1147,9 +1343,10 @@ document.getElementById("closeSettings").addEventListener("click", ()=>document.
 document.getElementById("resetAll").addEventListener("click", ()=>{
   if(!confirm("Tout réinitialiser (convives, liens, plan) ?")) return;
   state = { config:{tables:6,seats:8,kids:false}, couple:freshCouple(), guests:[], links:[],
-    weights:{ ...DEFAULT_WEIGHTS }, assignment:{}, tables:[] };
-  uid=1; linkMode=null; linkFirst=null;
+    weights:{ ...DEFAULT_WEIGHTS }, assignment:{}, tables:[], pins:{} };
+  uid=1; linkMode=null; linkFirst=null; pinMode=false; pinFirst=null;
   document.querySelectorAll(".linktool .lt").forEach(x=>x.classList.remove("active"));
+  document.getElementById("pinBtn").classList.remove("active");
   document.getElementById("banner").classList.remove("show");
   document.getElementById("scorebadge").classList.remove("show");
   fillCoupleInputs();
@@ -1180,18 +1377,12 @@ document.getElementById("loadFile").addEventListener("change", e=>{
     try{
       const o = JSON.parse(r.result);
       const s = o.state || o;                 // accepte {state,uid} ou un état brut
-      if(!s || !s.config || !Array.isArray(s.guests)) throw new Error("structure");
-      state = s; uid = o.uid || s._uid || 1;
-      state.links      = state.links || [];
-      state.assignment = state.assignment || {};
-      state.tables     = state.tables || [];
-      state.weights    = normWeights(state.weights);
-      if(!state.couple) state.couple = freshCouple();
-      // garantir des ids uniques pour la suite
-      let maxN = 0; state.guests.forEach(g=>{ const m=/(\d+)/.exec(g.id||""); if(m) maxN=Math.max(maxN,+m[1]); });
-      uid = Math.max(uid, maxN+1);
-      linkMode=null; linkFirst=null;
+      if(!s || (!s.config && !Array.isArray(s.guests))) throw new Error("structure");
+      state = sanitizeState(s);               // normalise tout : pins, socia, liens, tables…
+      uid   = Math.max(o.uid || 1, maxIdNum());
+      linkMode=null; linkFirst=null; pinMode=false; pinFirst=null;
       document.querySelectorAll(".linktool .lt").forEach(x=>x.classList.remove("active"));
+      document.getElementById("pinBtn").classList.remove("active");
       document.getElementById("banner").classList.remove("show");
       applyConfigToInputs(); refreshWeightLabels(); fillCoupleInputs(); save(); render();
       document.getElementById("scorebadge").classList.toggle("show", state.tables.length>0);
