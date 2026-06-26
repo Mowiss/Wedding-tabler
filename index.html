@@ -34,7 +34,8 @@
   header{
     flex:0 0 auto;display:flex;align-items:center;gap:18px;flex-wrap:wrap;
     padding:12px 20px;border-bottom:1px solid var(--line);
-    background:rgba(251,248,243,.86);backdrop-filter:blur(6px);z-index:30;
+    background:rgba(251,248,243,.86);backdrop-filter:blur(6px);
+    position:relative;z-index:30;
   }
   .brand{display:flex;flex-direction:column;line-height:1;margin-right:6px}
   .brand b{font-family:var(--serif);font-weight:600;font-size:26px;letter-spacing:.3px}
@@ -526,7 +527,9 @@ function sanitizeState(raw){
     Object.keys(s.pins).forEach(gid=>{ if(validIds.has(gid) && s.pins[gid]) pins[gid]=String(s.pins[gid]); });
   }
 
-  return { config, couple, guests, links, weights: normWeights(s.weights), assignment, tables, pins };
+  const unplaced = Array.isArray(s.unplaced) ? s.unplaced.filter(id=>validIds.has(id)) : [];
+
+  return { config, couple, guests, links, weights: normWeights(s.weights), assignment, tables, pins, unplaced };
 }
 function maxIdNum(){
   let mx = 0;
@@ -543,7 +546,8 @@ let state = {
   weights: { ...DEFAULT_WEIGHTS },
   assignment:{},        // guestId -> tableId
   tables:  [],          // [{id,label,isKids,capacity,members:[guestId]}]
-  pins:    {}           // guestId -> tableId (placement forcé manuel 🪑)
+  pins:    {},          // guestId -> tableId (placement forcé manuel 🪑)
+  unplaced:[]           // guestId non placés faute de place (surlignés)
 };
 let uid = 1;
 const newId = () => "g"+(uid++);
@@ -570,7 +574,7 @@ function save(){
 let history = [], hpos = -1, histTimer = null, applyingHistory = false;
 function histSnapshot(){
   return JSON.stringify({ config:state.config, couple:state.couple, guests:state.guests,
-    links:state.links, weights:state.weights, assignment:state.assignment, tables:state.tables, pins:state.pins });
+    links:state.links, weights:state.weights, assignment:state.assignment, tables:state.tables, pins:state.pins, unplaced:state.unplaced });
 }
 function historyInit(){ history=[histSnapshot()]; hpos=0; updateUndoButtons(); }
 function record(){
@@ -587,13 +591,13 @@ function recordDebounced(){ clearTimeout(histTimer); histTimer = setTimeout(reco
 function applyHistory(){
   const o = JSON.parse(history[hpos]);
   state.config=o.config; state.couple=o.couple; state.guests=o.guests; state.links=o.links;
-  state.weights=o.weights; state.assignment=o.assignment; state.tables=o.tables; state.pins=o.pins;
+  state.weights=o.weights; state.assignment=o.assignment; state.tables=o.tables; state.pins=o.pins; state.unplaced=o.unplaced||[];
   applyingHistory = true;
   save();
   applyConfigToInputs(); refreshWeightLabels(); fillCoupleInputs();
   render();
   if(document.getElementById("guests").classList.contains("show")) renderGrid();
-  document.getElementById("scorebadge").classList.toggle("show", state.tables.length>0);
+  document.getElementById("scorebadge").classList.toggle("show", planActive());
   applyingHistory = false;
   updateUndoButtons();
 }
@@ -707,19 +711,21 @@ function buildGroups(pool, links, includeBaby){
 }
 
 /* ============ PLACEMENT D'UN POOL ============ */
-function seatPool(pool, links, includeBaby, nTables, seats){
+function seatPool(pool, links, includeBaby, nTables, seats, preset){
   /* sécurité : un même convive (même id) ne peut jamais être compté deux fois */
   const seenId=new Set();
   pool = pool.filter(g=>{ if(seenId.has(g.id)) return false; seenId.add(g.id); return true; });
 
   const groups = buildGroups(pool, links, includeBaby);
-  const tables = Array.from({length:nTables}, ()=>[]);
-  const oversized = [];
+  /* tables préremplies par les épingles (membres fixes, non déplaçables) */
+  const tables = Array.from({length:nTables}, (_,i)=> (preset && preset[i]) ? preset[i].slice() : []);
+  const unplaced = [];
   const movable = new Set();
-  groups.forEach(g=>{ if(g.length===1) movable.add(g[0].id); });
+  groups.forEach(g=>{ if(g.length===1) movable.add(g[0].id); });   // seuls les célibataires libres sont déplaçables
 
-  /* paires 🌩️ : interdites à la même table */
-  const inPool = new Set(pool.map(g=>g.id));
+  /* paires 🌩️ : interdites à la même table (en tenant compte des préremplis) */
+  const considered = pool.concat(...tables);
+  const inPool = new Set(considered.map(g=>g.id));
   const key = (a,b)=> a<b ? a+"|"+b : b+"|"+a;
   const forbid = new Set();
   links.forEach(l=>{ if(l.type==="storm" && l.a!==l.b && inPool.has(l.a) && inPool.has(l.b)) forbid.add(key(l.a,l.b)); });
@@ -728,11 +734,11 @@ function seatPool(pool, links, includeBaby, nTables, seats){
   const conflicts = (table)=>{ let c=0; for(let i=0;i<table.length;i++) for(let j=i+1;j<table.length;j++) if(pairForbidden(table[i].id,table[j].id)) c++; return c; };
 
   const gain = (group, table)=>{ let g=0; for(const x of group) for(const y of table) g+=aff(x,y); return g; };
-  const emptiest = ()=>{ let best=0,min=Infinity; for(let t=0;t<nTables;t++){ if(tables[t].length<min){min=tables[t].length;best=t;} } return best; };
 
-  /* PHASE 1 — répartition ÉQUILIBRÉE sur toutes les tables :
-     table la MOINS remplie qui peut accueillir le groupe SANS conflit 🌩️ ;
-     l'affinité ne sert qu'à départager à charge égale. */
+  /* PHASE 1 — répartition ÉQUILIBRÉE, CAPACITÉ STRICTE :
+     table la MOINS remplie qui peut accueillir le groupe SANS dépasser la capacité.
+     On évite d'abord les conflits 🌩️ ; à défaut on tolère 🌩️ (signalé) mais JAMAIS le dépassement.
+     Si aucune table n'a la place → groupe NON PLACÉ. */
   groups.sort((a,b)=>b.length-a.length);
   for(const group of groups){
     let best=-1, bestLoad=Infinity, bestGain=-Infinity;
@@ -742,16 +748,15 @@ function seatPool(pool, links, includeBaby, nTables, seats){
         if(load<bestLoad || (load===bestLoad && g>bestGain)){ best=t; bestLoad=load; bestGain=g; }
       }
     }
-    if(best<0){                                   // pas de table sous capacité sans conflit
-      let min=Infinity;                           // → on garde « sans conflit », on tolère le débordement
-      for(let t=0;t<nTables;t++){ if(placeOK(group, tables[t]) && tables[t].length<min){ min=tables[t].length; best=t; } }
+    if(best<0){                                   // pas de table sans conflit → on tolère 🌩️, capacité respectée
+      let min=Infinity;
+      for(let t=0;t<nTables;t++){ if(tables[t].length+group.length<=seats && tables[t].length<min){ min=tables[t].length; best=t; } }
     }
-    if(best<0){ best=emptiest(); }                // contrainte 🌩️ impossible à honorer → on place quand même
-    if(group.length>seats) oversized.push(group);
+    if(best<0){ unplaced.push(...group); continue; }   // plus aucune place → NON PLACÉ
     tables[best].push(...group);
   }
 
-  /* PHASE 2 — optimisation de l'affinité, sans casser l'équilibre NI créer de conflit 🌩️ */
+  /* PHASE 2 — optimisation de l'affinité, capacité toujours respectée, sans conflit 🌩️ supplémentaire */
   let cur = tablesScore(tables), improved = true, guard = 0;
   while(improved && guard++<80){
     improved = false;
@@ -792,13 +797,14 @@ function seatPool(pool, links, includeBaby, nTables, seats){
   let stormUnmet = 0;
   forbid.forEach(k=>{ const p=k.split("|"); if(tableOf[p[0]]!==undefined && tableOf[p[0]]===tableOf[p[1]]) stormUnmet++; });
 
-  return { tables, oversized, stormUnmet };
+  return { tables, unplaced, stormUnmet };
 }
 
 /* ============ OPTIMISATION GLOBALE ============ */
 function optimize(){
   syncConfig();
   if(!state.pins) state.pins = {};
+  state.unplaced = [];
   const working = allGuests();
   if(working.length===0){ toast("Aucun convive à placer."); return; }
   const { tables:T, seats:S, kids:kidsMode } = state.config;
@@ -832,51 +838,64 @@ function optimize(){
   const freeCouple = couple.filter(c=>!pinnedIds.has(c.id));
   adultPool = [...freeCouple, ...adultPool];   // les mariés s'asseyent toujours côté adultes
 
-  /* lien implicite et permanent entre le marié et la mariée */
   let adultLinks = state.links;
   if(freeCouple.length===2) adultLinks = [...state.links, { id:"__couple", a:"M", b:"F", type:"couple" }];
 
-  const adultRes = seatPool(adultPool, adultLinks, !kidsMode, T, S);
+  /* ---- préremplissage des tables par les épingles (capacité stricte) ---- */
+  const adultPinned = [], kidPinned = [];
+  pinnedGroups.forEach(gp=>{ (/^K\d+$/.test(gp.table) ? kidPinned : adultPinned).push(gp); });
 
+  const adultPreset = Array.from({length:T}, ()=>[]);
+  adultPinned.forEach(gp=>{
+    const m = /^T(\d+)$/.exec(gp.table); const ti = m ? +m[1]-1 : -1;
+    if(ti<0 || ti>=T){ gp.members.forEach(g=>state.unplaced.push(g.id)); warnings.push("Épingle 🪑 vers une table inexistante : convive(s) non placé(s)."); return; }
+    if(adultPreset[ti].length + gp.members.length <= S) adultPreset[ti].push(...gp.members);
+    else { gp.members.forEach(g=>state.unplaced.push(g.id)); warnings.push(`Table ${gp.table} pleine : épingle(s) 🪑 non placée(s).`); }
+  });
+
+  const adultRes = seatPool(adultPool, adultLinks, !kidsMode, T, S, adultPreset);
+
+  /* ---- enfants ---- */
   let kidRes = null, nKid = 0;
-  if(kidsMode && kidPool.length){
-    nKid = Math.max(1, Math.ceil(kidPool.length/S));
-    if(nKid>1) warnings.push(`${kidPool.length} enfants : ${nKid} tables enfant créées (une seule ne suffit pas).`);
-    kidRes = seatPool(kidPool, [], false, nKid, S);
+  if(kidsMode && (kidPool.length || kidPinned.length)){
+    let maxK = 1; kidPinned.forEach(gp=>{ const m=/^K(\d+)$/.exec(gp.table); if(m) maxK=Math.max(maxK,+m[1]); });
+    const kidPinnedCount = kidPinned.reduce((s,g)=>s+g.members.length,0);
+    nKid = Math.max(maxK, Math.ceil((kidPool.length + kidPinnedCount)/S) || 1, 1);
+    if(nKid>1) warnings.push(`${kidPool.length} enfants : ${nKid} tables enfant créées.`);
+    const kidPreset = Array.from({length:nKid}, ()=>[]);
+    kidPinned.forEach(gp=>{
+      const m=/^K(\d+)$/.exec(gp.table); const ki = m ? +m[1]-1 : 0;
+      if(ki>=0 && ki<nKid && kidPreset[ki].length+gp.members.length<=S) kidPreset[ki].push(...gp.members);
+      else { gp.members.forEach(g=>state.unplaced.push(g.id)); warnings.push("Table enfant pleine : épingle(s) 🪑 non placée(s)."); }
+    });
+    kidRes = seatPool(kidPool, [], false, nKid, S, kidPreset);
   }
 
   /* reconstruire les tables + assignation */
   state.tables = []; state.assignment = {};
-  const tableById = {};
   adultRes.tables.forEach((mem,i)=>{
     const id = "T"+(i+1);
     const t = { id, label:"Table "+(i+1), isKids:false, capacity:S, members:mem.map(g=>g.id) };
-    state.tables.push(t); tableById[id]=t;
+    state.tables.push(t);
     mem.forEach(g=>state.assignment[g.id]=id);
   });
   if(kidRes){
     kidRes.tables.forEach((mem,i)=>{
       const id = "K"+(i+1);
       const t = { id, label: nKid>1?("Enfants "+(i+1)):"Enfants", isKids:true, capacity:S, members:mem.map(g=>g.id) };
-      state.tables.push(t); tableById[id]=t;
+      state.tables.push(t);
       mem.forEach(g=>state.assignment[g.id]=id);
     });
   }
 
-  /* placer les groupes épinglés sur LEUR table */
-  let pinMissing = 0;
-  pinnedGroups.forEach(gp=>{
-    let t = tableById[gp.table];
-    if(!t){ pinMissing++; t = state.tables[0]; }
-    gp.members.forEach(g=>{ if(state.assignment[g.id]===undefined){ t.members.push(g.id); state.assignment[g.id]=t.id; } });
-  });
-  if(pinMissing) warnings.push(`${pinMissing} épingle(s) 🪑 visaient une table inexistante : reportée(s) sur une autre table.`);
+  /* non-placés : surcapacité globale (renvoyés par seatPool) + épingles non logées */
+  adultRes.unplaced.forEach(g=>state.unplaced.push(g.id));
+  if(kidRes) kidRes.unplaced.forEach(g=>state.unplaced.push(g.id));
+  state.unplaced = [...new Set(state.unplaced)].filter(id=>state.assignment[id]===undefined);
 
-  /* personne n'est jamais « non placé » : on signale seulement une éventuelle surcapacité */
-  const over = state.tables.filter(t=>t.members.length>t.capacity);
-  if(over.length){
+  if(state.unplaced.length){
     const totalSeats = T*S + (kidRes? nKid*S : 0);
-    warnings.push(`Tout le monde est placé, mais ${over.length} table(s) dépassent leur capacité (${working.length} convives pour ${totalSeats} places). Ajoutez des tables ou des places.`);
+    warnings.push(`${state.unplaced.length} convive(s) non placé(s) faute de place (${working.length} convives pour ${totalSeats} places) — surlignés en rouge. Ajoutez des tables ou des places.`);
   }
 
   /* liens 🌩️ qui n'ont pas pu être respectés */
@@ -896,13 +915,27 @@ function optimize(){
 }
 
 /* ============ TABLES POUR L'AFFICHAGE ============ */
+/* construit les tables depuis la config et les REMPLIT à partir de l'assignation,
+   en respectant la capacité : ainsi les épingles 🪑 peuplent les places en direct,
+   et un plan « tout épinglé » s'affiche sans passer par À TABLE!. */
 function displayTables(){
-  if(state.tables.length) return state.tables;
-  const { tables:T, kids:kidsMode } = state.config, arr=[];
-  for(let i=0;i<T;i++) arr.push({ id:"T"+(i+1), label:"Table "+(i+1), isKids:false, capacity:state.config.seats, members:[] });
-  if(kidsMode) arr.push({ id:"K1", label:"Enfants", isKids:true, capacity:state.config.seats, members:[] });
+  const { tables:T, seats:S, kids:kidsMode } = state.config;
+  const arr=[], map={};
+  for(let i=0;i<T;i++){ const t={id:"T"+(i+1),label:"Table "+(i+1),isKids:false,capacity:S,members:[]}; arr.push(t); map[t.id]=t; }
+  if(kidsMode){
+    let nK=1;
+    Object.values(state.assignment||{}).forEach(tid=>{ const m=/^K(\d+)$/.exec(tid||""); if(m) nK=Math.max(nK,+m[1]); });
+    for(let i=0;i<nK;i++){ const t={id:"K"+(i+1),label:nK>1?("Enfants "+(i+1)):"Enfants",isKids:true,capacity:S,members:[]}; arr.push(t); map[t.id]=t; }
+  }
+  const ids=[];
+  if(state.couple.marie.name  && state.couple.marie.name.trim())  ids.push("M");
+  if(state.couple.mariee.name && state.couple.mariee.name.trim()) ids.push("F");
+  state.guests.forEach(g=>ids.push(g.id));
+  ids.forEach(id=>{ const tid=state.assignment[id]; if(tid && map[tid] && map[tid].members.length<S) map[tid].members.push(id); });
+  state.tables = arr;
   return arr;
 }
+function planActive(){ return Object.keys(state.assignment||{}).length>0; }
 
 /* ============ GÉOMÉTRIE DES RAYONS ============ */
 /* ordre des convives autour du cercle : les paires reliées par ❤️ restent
@@ -961,6 +994,8 @@ function render(){
   const svg = document.getElementById("stage");
   svg.innerHTML = "";
   const tables = displayTables();
+  const seated = new Set(); tables.forEach(t=>t.members.forEach(id=>seated.add(id)));
+  const unplacedSet = new Set((state.unplaced||[]).filter(id=>!seated.has(id)));
   const ang = sideAngles();
   if(view.rot) Object.keys(ang).forEach(k=> ang[k] += view.rot);   // rotation de la roue des noms
 
@@ -974,15 +1009,33 @@ function render(){
   });
 
   const Rin = 350, Rtick = 420, Rlbl = 432;
+  const rTable = Math.max(30, 18 + state.config.seats*2.2);
 
-  /* --- lignes d'assignation (sous les rayons) --- */
-  const gAssign = el("g",{});
+  /* courbe convive → table : bombée vers l'extérieur du cluster pour ne pas chevaucher les tables ;
+     se termine au bord de la table (pas en son centre) */
+  function tableCurve(angDeg, tpos){
+    const a = angDeg*Math.PI/180;
+    const gx = CX+Rin*Math.cos(a), gy = CY+Rin*Math.sin(a);
+    let dx = gx-tpos.x, dy = gy-tpos.y; const dl = Math.hypot(dx,dy)||1; dx/=dl; dy/=dl;
+    const tx = tpos.x + dx*(rTable+3), ty = tpos.y + dy*(rTable+3);   // bord de la table, côté convive
+    const mx0=(gx+tx)/2, my0=(gy+ty)/2;
+    let ox=mx0-CX, oy=my0-CY, ol=Math.hypot(ox,oy);
+    if(ol<1){ ox=Math.cos(a); oy=Math.sin(a); ol=1; }                 // ligne quasi-radiale : on bombe côté convive
+    ox/=ol; oy/=ol;
+    const Rcluster = RT + rTable + 28;
+    const bow = Math.max(0, Rcluster - ol) + 24;                       // d'autant plus bombé que la ligne passe près du centre
+    const cx = mx0 + ox*bow, cy = my0 + oy*bow;
+    const d = `M ${gx.toFixed(1)} ${gy.toFixed(1)} Q ${cx.toFixed(1)} ${cy.toFixed(1)} ${tx.toFixed(1)} ${ty.toFixed(1)}`;
+    const mx = 0.25*gx + 0.5*cx + 0.25*tx, my = 0.25*gy + 0.5*cy + 0.25*ty;   // milieu de la courbe (t=0.5)
+    return { d, mx, my };
+  }
+
+  /* --- lignes d'assignation (courbées ; les épinglés sont tracés à part) --- */
+  const gAssign = el("g",{ style:"pointer-events:none" });
   state.guests.forEach(g=>{
-    const tid = state.assignment[g.id]; if(!tid || !pos[tid]) return;
-    const a = (ang[g.id]||0)*Math.PI/180;
-    const sx = CX+Rin*Math.cos(a), sy = CY+Rin*Math.sin(a);
+    const tid = state.assignment[g.id]; if(!tid || !pos[tid] || state.pins[g.id]) return;
     const col = g.side==="bride" ? "var(--bride)" : "var(--groom)";
-    gAssign.appendChild(el("line",{ x1:sx,y1:sy, x2:pos[tid].x, y2:pos[tid].y,
+    gAssign.appendChild(el("path",{ d:tableCurve(ang[g.id]||0, pos[tid]).d, fill:"none",
       stroke:col, "stroke-width":1, "stroke-opacity":.22, "data-line-guest":g.id }));
   });
   svg.appendChild(gAssign);
@@ -990,7 +1043,6 @@ function render(){
   /* --- tables --- */
   tables.forEach(t=>{
     const p = pos[t.id];
-    const rTable = Math.max(30, 18 + state.config.seats*2.2);
     const g = el("g",{ "data-table":t.id, style:"cursor:pointer" });
     const ring = t.isKids ? "var(--kids)" : "var(--gold)";
     /* sièges */
@@ -1011,18 +1063,19 @@ function render(){
     svg.appendChild(g);
   });
 
-  /* --- épingles 🪑 : ligne convive → table forcée --- */
+  /* --- épingles 🪑 : courbe convive → table ; CLIQUABLE pour couper en navigation normale,
+     mais NON bloquante pendant les modes placement/lien (sinon elle masque les tables) --- */
   const PIN="#2B8A85";
+  const pinInteractive = !pinMode && !linkMode;
   Object.keys(state.pins || {}).forEach(gid=>{
     const tid = state.pins[gid]; if(ang[gid]===undefined || !pos[tid]) return;
-    const a = ang[gid]*Math.PI/180;
-    const gx=CX+Rin*Math.cos(a), gy=CY+Rin*Math.sin(a);
-    const mx=(gx+pos[tid].x)/2, my=(gy+pos[tid].y)/2;
-    const grp = el("g",{});
-    grp.appendChild(el("line",{ x1:gx,y1:gy,x2:pos[tid].x,y2:pos[tid].y, stroke:PIN,
-      "stroke-width":2, "stroke-opacity":.55 }));
-    grp.appendChild(el("circle",{ cx:mx, cy:my, r:11, fill:"#fff", stroke:PIN, "stroke-width":1.3 }));
-    grp.appendChild(el("text",{ x:mx, y:my+4, "text-anchor":"middle", "font-size":11 }, "🪑"));
+    const c = tableCurve(ang[gid], pos[tid]);
+    const grp = el("g", pinInteractive ? { "data-pin":gid, style:"cursor:pointer" }
+                                        : { style:"pointer-events:none" });
+    if(pinInteractive) grp.appendChild(el("path",{ d:c.d, fill:"none", stroke:"transparent", "stroke-width":16 }));  // zone de clic
+    grp.appendChild(el("path",{ d:c.d, fill:"none", stroke:PIN, "stroke-width":2, "stroke-opacity":.6 }));
+    grp.appendChild(el("circle",{ cx:c.mx, cy:c.my, r:11, fill:"#fff", stroke:PIN, "stroke-width":1.3 }));
+    grp.appendChild(el("text",{ x:c.mx, y:c.my+4, "text-anchor":"middle", "font-size":11 }, "🪑"));
     svg.appendChild(grp);
   });
   /* --- liens entre convives --- */
@@ -1098,7 +1151,9 @@ function render(){
     if(ang[g.id]===undefined) return;
     const a = (ang[g.id])*Math.PI/180;
     const isCouple = !!g.role;
-    const col = g.side==="bride" ? "var(--bride)" : "var(--groom)";
+    const unplaced = unplacedSet.has(g.id);
+    const baseCol = g.side==="bride" ? "var(--bride)" : "var(--groom)";
+    const col = unplaced ? "#D64541" : baseCol;
     const ix=CX+Rin*Math.cos(a), iy=CY+Rin*Math.sin(a);
     const tx=CX+Rtick*Math.cos(a), ty=CY+Rtick*Math.sin(a);
     const lx=CX+Rlbl*Math.cos(a), ly=CY+Rlbl*Math.sin(a);
@@ -1111,8 +1166,17 @@ function render(){
     grp.appendChild(el("circle",{ cx:tx, cy:ty, r:isCouple?5.5:(selected?5:3.4), fill:col,
       stroke:isCouple?"var(--gold)":"none", "stroke-width":isCouple?2:0 }));
     const label = (isCouple?"👑 ":"") + ((g.name && g.name.trim()) ? g.name.trim() : "(sans nom)");
+    /* surbrillance « non placé » : pastille rouge derrière le nom */
+    if(unplaced){
+      const wTxt = Math.max(46, nameBackR(g) - Rlbl);
+      const h = isCouple?22:19;
+      const rx = anchor==="end" ? lx - wTxt - 6 : lx - 6;
+      grp.appendChild(el("rect",{ x:rx, y:ly-h/2, width:wTxt+12, height:h, rx:8,
+        fill:"rgba(214,69,65,.16)", stroke:"rgba(214,69,65,.55)", "stroke-width":1,
+        transform:`rotate(${rot} ${lx} ${ly})` }));
+    }
     const txt = el("text",{ x:lx, y:ly, "text-anchor":anchor, transform:`rotate(${rot} ${lx} ${ly})`,
-      "font-size":isCouple?16:14, fill:col, "font-weight":(selected||isCouple)?700:500,
+      "font-size":isCouple?16:14, fill:col, "font-weight":(selected||isCouple||unplaced)?700:500,
       "dominant-baseline":"middle",
       "font-family": isCouple?"var(--serif)":"var(--sans)" }, label);
     grp.appendChild(txt);
@@ -1123,7 +1187,10 @@ function render(){
   lastFIT = Math.max(maxLaneR + 18, 640) + 24;
   applyView();
 
-  document.getElementById("scorebadge").classList.toggle("show", state.tables.length>0);
+  const planOn = seated.size>0;
+  if(planOn) document.getElementById("scoreVal").textContent =
+    Math.round(tablesScore(tables.map(t=>t.members.map(byId).filter(Boolean))));
+  document.getElementById("scorebadge").classList.toggle("show", planOn);
 }
 
 /* ============ ZOOM / ROTATION DE LA ROUE ============ */
@@ -1158,21 +1225,52 @@ document.getElementById("stage").addEventListener("click", e=>{
   const gEl = e.target.closest("[data-guest]");
   const lEl = e.target.closest("[data-link]");
   const tEl = e.target.closest("[data-table]");
+  const pinEl = e.target.closest("[data-pin]");
+
+  /* couper un lien 🪑 d'un clic sur la ligne (en navigation normale) */
+  if(pinEl && !pinMode && !linkMode){
+    const gid = pinEl.getAttribute("data-pin");
+    const wasTable = state.pins[gid];
+    delete state.pins[gid];
+    if(state.assignment[gid]===wasTable) delete state.assignment[gid];   // libère la place posée par l'épingle
+    save(); render(); toast("Lien 🪑 coupé.");
+    return;
+  }
 
   /* mode épingle 🪑 : convive puis table */
   if(pinMode){
     if(gEl){
       const id = gEl.getAttribute("data-guest");
-      if(state.pins[id]){ delete state.pins[id]; pinFirst=null; save(); render(); toast("Épingle retirée."); return; }
+      if(state.pins[id]){
+        const wasTable = state.pins[id];
+        delete state.pins[id];
+        if(state.assignment[id]===wasTable) delete state.assignment[id];   // libère la place posée par l'épingle
+        pinFirst=null; save(); render(); toast("Épingle retirée."); return;
+      }
       pinFirst = (pinFirst===id) ? null : id;
       render(); return;
     }
     if(tEl && pinFirst){
       const tid = tEl.getAttribute("data-table");
+      const dt = displayTables(); const tt = dt.find(t=>t.id===tid);
+      const S = state.config.seats;
+      const already = tt && tt.members.includes(pinFirst);
+      let evictedName = null;
+      if(tt && tt.members.length>=S && !already){
+        /* table pleine : la pose manuelle est prioritaire → on déloge un convive NON épinglé */
+        const occupants = tt.members.filter(id=> id!==pinFirst && !state.pins[id]);
+        if(!occupants.length){ toast(`Table ${tid} pleine de convives épinglés — retirez-en un d'abord.`); return; }
+        const evicted = occupants[occupants.length-1];
+        delete state.assignment[evicted];                 // libère sa place (il sera à replacer)
+        evictedName = gName(byId(evicted));
+      }
       state.pins[pinFirst] = tid;
+      state.assignment[pinFirst] = tid;                   // placement immédiat sur la table
+      if(state.unplaced) state.unplaced = state.unplaced.filter(id=>id!==pinFirst);
       const who = gName(byId(pinFirst));
       pinFirst=null; save(); render();
-      toast(`🪑 ${who} épinglé(e) à ${tid}.`);
+      toast(evictedName ? `🪑 ${who} placé(e) à ${tid} · ${evictedName} délogé(e) (à replacer).`
+                        : `🪑 ${who} placé(e) à ${tid}.`);
       return;
     }
     return;
@@ -1489,8 +1587,9 @@ clearMenu.querySelector('[data-clear="all"]').addEventListener("click", ()=>{
   clearMenu.hidden = true;
   if(!confirm("Tout effacer (convives, liens, plan) ?")) return;
   state = { config:{tables:6,seats:8,kids:false}, couple:freshCouple(), guests:[], links:[],
-    weights:{ ...DEFAULT_WEIGHTS }, assignment:{}, tables:[], pins:{} };
+    weights:{ ...DEFAULT_WEIGHTS }, assignment:{}, tables:[], pins:{}, unplaced:[] };
   uid=1; linkMode=null; linkFirst=null; pinMode=false; pinFirst=null;
+  view.zoom=1; view.rot=0; const rs=document.getElementById("rotSlider"); if(rs) rs.value=0;
   document.querySelectorAll(".linktool [data-link]").forEach(x=>x.classList.remove("active"));
   document.getElementById("pinBtn").classList.remove("active");
   document.getElementById("banner").classList.remove("show");
@@ -1555,7 +1654,7 @@ document.getElementById("loadFile").addEventListener("change", e=>{
       document.getElementById("pinBtn").classList.remove("active");
       document.getElementById("banner").classList.remove("show");
       applyConfigToInputs(); refreshWeightLabels(); fillCoupleInputs(); save(); render();
-      document.getElementById("scorebadge").classList.toggle("show", state.tables.length>0);
+      document.getElementById("scorebadge").classList.toggle("show", planActive());
       historyInit();
       toast("Projet chargé · "+state.guests.length+" convives.");
     }catch(err){
@@ -1594,7 +1693,7 @@ function buildPrintDoc(){
 document.getElementById("printBtn").addEventListener("click", ()=>{
   syncConfig();
   if(allGuests().length===0){ toast("Ajoutez des convives avant d'imprimer."); return; }
-  if(state.tables.length===0){ toast("Astuce : lancez « À TABLE ! » pour remplir les listes. J'imprime quand même les tables vides."); }
+  if(!planActive()){ toast("Astuce : lancez « À TABLE ! » ou placez les convives 🪑. J'imprime quand même les tables vides."); }
   buildPrintDoc();
   setTimeout(()=>window.print(), 60);
 });
@@ -1610,7 +1709,7 @@ load();
 applyConfigToInputs();
 refreshWeightLabels();
 render();
-if(state.tables.length){ document.getElementById("scoreVal").textContent = Math.round(tablesScore(displayTables().map(t=>t.members.map(byId).filter(Boolean)))); document.getElementById("scorebadge").classList.add("show"); }
+if(planActive()){ document.getElementById("scoreVal").textContent = Math.round(tablesScore(displayTables().map(t=>t.members.map(byId).filter(Boolean)))); document.getElementById("scorebadge").classList.add("show"); }
 historyInit();
 </script>
 </body>
