@@ -137,6 +137,21 @@
   .rot-ico{font-size:15px}
   #rotSlider{width:240px;accent-color:var(--gold-deep)}
 
+  /* mode Ajuster */
+  .btn.ghost.active{background:var(--gold);border-color:var(--gold);color:#fff}
+  .btn:disabled{opacity:.4;cursor:default}
+  @keyframes blinkRed{ 0%,100%{stroke:#D64541;opacity:1} 50%{stroke:#f0a0a0;opacity:.55} }
+  .adj-over{ animation:blinkRed .8s ease-in-out infinite }
+  .adj-target{ stroke:#2B8A85 !important; stroke-width:4.5 !important; filter:drop-shadow(0 0 6px rgba(43,138,133,.5)) }
+  .adjhint{
+    position:absolute;left:50%;top:14px;transform:translateX(-50%);z-index:18;
+    background:rgba(255,255,255,.94);border:1px solid var(--line);border-radius:999px;
+    padding:7px 16px;box-shadow:var(--shadow);font-size:12.5px;color:var(--ink-soft);display:none
+  }
+  .adjhint.show{display:block}
+  #stage.dragging [data-adj-guest]{ pointer-events:none }
+  #stage.dragging{ cursor:grabbing }
+
   /* toast */
   #toast{
     position:absolute;bottom:18px;left:50%;transform:translateX(-50%) translateY(20px);
@@ -320,6 +335,7 @@
   </div>
 
   <button class="btn primary" id="seatBtn">À&nbsp;TABLE&nbsp;!</button>
+  <button class="btn ghost" id="adjustBtn" title="Ajuster : glisser les convives entre les tables (nécessite que tout le monde soit placé)">⚖️&nbsp;Ajuster</button>
 </header>
 
 <main>
@@ -336,6 +352,8 @@
     <span class="rot-ico" title="Faire tourner la roue des noms">🔄</span>
     <input id="rotSlider" type="range" min="0" max="360" value="0" title="Faire tourner la roue des noms">
   </div>
+
+  <div class="adjhint" id="adjhint">✋ Mode Ajuster · glissez un convive d'une table à l'autre · les tables en dépassement clignotent</div>
 
   <div class="banner" id="banner"></div>
 
@@ -647,6 +665,8 @@ const CX = 600, CY = 600;
 const ZMAX = 4.5;
 let view = { zoom:1, rot:0 };   // zoom caméra + rotation de la roue des noms
 let lastFIT = 640;              // demi-taille du cadrage plein calculé au dernier rendu
+let adjustMode = false, adjustPos = [], dragGuest = null, dragGhost = null;   // mode Ajuster (drag & drop)
+let adjustCircle = {}, hoverTable = null, dragLabel = null;                    // feedback drag & drop
 
 function toast(msg, warns){
   const t = document.getElementById("toast");
@@ -931,11 +951,17 @@ function displayTables(){
   if(state.couple.marie.name  && state.couple.marie.name.trim())  ids.push("M");
   if(state.couple.mariee.name && state.couple.mariee.name.trim()) ids.push("F");
   state.guests.forEach(g=>ids.push(g.id));
-  ids.forEach(id=>{ const tid=state.assignment[id]; if(tid && map[tid] && map[tid].members.length<S) map[tid].members.push(id); });
+  ids.forEach(id=>{ const tid=state.assignment[id]; if(tid && map[tid]) map[tid].members.push(id); });
   state.tables = arr;
   return arr;
 }
 function planActive(){ return Object.keys(state.assignment||{}).length>0; }
+/* tous les convives (mariés inclus) ont-ils une table ? (condition du mode Ajuster) */
+function allSeated(){
+  const all = [...state.guests.map(g=>g.id), ...namedCouple().map(c=>c.id)];
+  if(!all.length) return false;
+  return all.every(id=> state.assignment[id]!==undefined) && (state.unplaced||[]).length===0;
+}
 
 /* ============ GÉOMÉTRIE DES RAYONS ============ */
 /* ordre des convives autour du cercle : les paires reliées par ❤️ restent
@@ -993,6 +1019,11 @@ function render(){
   if(!state.pins) state.pins = {};
   const svg = document.getElementById("stage");
   svg.innerHTML = "";
+  /* activation du bouton Ajuster + bascule de vue */
+  const adjBtn = document.getElementById("adjustBtn");
+  if(adjBtn){ adjBtn.disabled = !allSeated() && !adjustMode; adjBtn.classList.toggle("active", adjustMode); }
+  if(adjustMode){ renderAdjust(svg); return; }
+  document.getElementById("adjhint").classList.remove("show");
   const tables = displayTables();
   const seated = new Set(); tables.forEach(t=>t.members.forEach(id=>seated.add(id)));
   const unplacedSet = new Set((state.unplaced||[]).filter(id=>!seated.has(id)));
@@ -1193,6 +1224,160 @@ function render(){
   document.getElementById("scorebadge").classList.toggle("show", planOn);
 }
 
+/* ============ MODE AJUSTER (tables agrandies + drag & drop) ============ */
+/* étiquette d'apothicaire : rectangle aux flancs concaves (waisté) + coins arrondis */
+function apothecaryPath(w, h){
+  const W=w/2, H=h/2, r=Math.min(5,h/3), notch=Math.min(5.5,h/3.2);
+  return `M ${-W+r} ${-H} L ${W-r} ${-H} Q ${W} ${-H} ${W} ${-H+r} `+
+         `Q ${W-notch} 0 ${W} ${H-r} Q ${W} ${H} ${W-r} ${H} `+
+         `L ${-W+r} ${H} Q ${-W} ${H} ${-W} ${H-r} `+
+         `Q ${-W+notch} 0 ${-W} ${-H+r} Q ${-W} ${-H} ${-W+r} ${-H} Z`;
+}
+function renderAdjust(svg){
+  document.getElementById("adjhint").classList.add("show");
+  document.getElementById("scorebadge").classList.toggle("show", true);
+  const tables = displayTables();
+  const n = tables.length || 1;
+  const cols = Math.ceil(Math.sqrt(n));
+  const rows = Math.ceil(n/cols);
+  const cellW = 420, cellH = 400;
+  const rT = 54, labLen = 92, labH = 22, gap = 4;
+  adjustPos = []; adjustCircle = {};
+  tables.forEach((t, idx)=>{
+    const cx = (idx%cols)*cellW + cellW/2;
+    const cy = Math.floor(idx/cols)*cellH + cellH/2;
+    const over = t.members.length > t.capacity;
+    adjustPos.push({ id:t.id, x:cx, y:cy });
+    const ring = t.isKids ? "var(--kids)" : "var(--gold)";
+
+    /* zone de dépôt (invisible) couvrant toute la cellule */
+    svg.appendChild(el("rect",{ "data-table":t.id, x:cx-cellW/2+6, y:cy-cellH/2+6,
+      width:cellW-12, height:cellH-12, rx:20, fill:"#fff", "fill-opacity":0, style:"pointer-events:all" }));
+
+    /* étiquettes des convives, COLLÉES à la table et rayonnant autour (cartons de placement) */
+    const m = t.members.length;
+    t.members.forEach((id, k)=>{
+      const a = (k/Math.max(1,m))*2*Math.PI - Math.PI/2;
+      const R = rT + gap + labLen/2;
+      const lx = cx + R*Math.cos(a), ly = cy + R*Math.sin(a);
+      const aDeg = a*180/Math.PI, flip = Math.cos(a)<0;
+      const g = byId(id); const nm = g ? gName(g) : "?";
+      const col = (g && g.role) ? "var(--gold-deep)" : (g && g.side==="bride" ? "var(--bride)" : "var(--groom)");
+      const gl = el("g",{ "data-adj-guest":id, style:"cursor:grab",
+        transform:`translate(${lx.toFixed(1)} ${ly.toFixed(1)}) rotate(${aDeg.toFixed(1)})` });
+      gl.appendChild(el("path",{ d:apothecaryPath(labLen,labH), fill:"#fdfaf2", stroke:col, "stroke-width":1.3 }));
+      gl.appendChild(el("path",{ d:apothecaryPath(labLen-7,labH-7), fill:"none", stroke:col, "stroke-width":.6, "stroke-opacity":.45 }));
+      gl.appendChild(el("text",{ x:0, y:0, "text-anchor":"middle", "dominant-baseline":"central",
+        "font-size":11, fill:col, transform:`rotate(${flip?180:0})` }, nm.length>14 ? nm.slice(0,13)+"…" : nm));
+      svg.appendChild(gl);
+    });
+
+    /* table (dessinée par-dessus les bases d'étiquettes, pour l'effet « collé ») */
+    const gT = el("g",{});
+    const circ = el("circle",{ cx, cy, r:rT, fill:"#fff", stroke: over?"#D64541":ring, "stroke-width": over?3:1.8 });
+    if(over) circ.setAttribute("class","adj-over");
+    adjustCircle[t.id] = circ;
+    gT.appendChild(circ);
+    gT.appendChild(el("text",{ x:cx, y:cy-2, "text-anchor":"middle", "font-family":"var(--serif)",
+      "font-size":21, fill:"var(--ink)" }, t.isKids?"🍼":t.label.replace("Table ","T")));
+    gT.appendChild(el("text",{ x:cx, y:cy+17, "text-anchor":"middle", "font-size":12.5,
+      fill: over?"#D64541":"var(--ink-soft)", "font-weight":over?700:400 }, t.members.length+"/"+t.capacity));
+    svg.appendChild(gT);
+  });
+  const W = cols*cellW, H = rows*cellH;
+  svg.setAttribute("viewBox", `-20 -20 ${W+40} ${H+40}`);
+  document.getElementById("scoreVal").textContent =
+    Math.round(tablesScore(tables.map(t=>t.members.map(byId).filter(Boolean))));
+}
+
+function svgPoint(clientX, clientY){
+  const svg = document.getElementById("stage");
+  const pt = svg.createSVGPoint(); pt.x = clientX; pt.y = clientY;
+  const m = svg.getScreenCTM(); if(!m) return {x:0,y:0};
+  const p = pt.matrixTransform(m.inverse());
+  return { x:p.x, y:p.y };
+}
+function makeGhost(id, p){
+  const g = byId(id); const nm = g ? gName(g) : "?";
+  const col = (g && g.role) ? "var(--gold-deep)" : (g && g.side==="bride" ? "var(--bride)" : "var(--groom)");
+  const gh = el("g",{ style:"pointer-events:none", opacity:".92" });
+  gh.appendChild(el("path",{ d:apothecaryPath(98,24), fill:col, stroke:"#fff", "stroke-width":1.6,
+    transform:`translate(${p.x} ${p.y})` }));
+  gh.appendChild(el("text",{ x:p.x, y:p.y, "text-anchor":"middle", "dominant-baseline":"central",
+    "font-size":11, fill:"#fff" }, nm.length>14 ? nm.slice(0,13)+"…" : nm));
+  return gh;
+}
+(function initAdjustDrag(){
+  const svg = document.getElementById("stage");
+  function setHover(tid){
+    if(tid===hoverTable) return;
+    if(hoverTable && adjustCircle[hoverTable]) adjustCircle[hoverTable].classList.remove("adj-target");
+    hoverTable = tid;
+    if(tid && adjustCircle[tid]) adjustCircle[tid].classList.add("adj-target");
+  }
+  function tableUnder(clientX, clientY){
+    const t = document.elementFromPoint(clientX, clientY);
+    const tEl = t && t.closest ? t.closest("[data-table]") : null;
+    return tEl && tEl.getAttribute("data-table");
+  }
+  svg.addEventListener("pointerdown", e=>{
+    if(!adjustMode) return;
+    const lbl = e.target.closest("[data-adj-guest]");
+    if(!lbl) return;
+    e.preventDefault();
+    dragGuest = lbl.getAttribute("data-adj-guest");
+    dragLabel = lbl; lbl.setAttribute("opacity", ".28");         // feedback : source estompée
+    svg.classList.add("dragging");
+    const p = svgPoint(e.clientX, e.clientY);
+    dragGhost = makeGhost(dragGuest, p);
+    svg.appendChild(dragGhost);
+    try{ svg.setPointerCapture(e.pointerId); }catch(_){}
+  });
+  svg.addEventListener("pointermove", e=>{
+    if(!dragGuest || !dragGhost) return;
+    const p = svgPoint(e.clientX, e.clientY);
+    dragGhost.children[0].setAttribute("transform", `translate(${p.x} ${p.y})`);
+    dragGhost.children[1].setAttribute("x", p.x); dragGhost.children[1].setAttribute("y", p.y);
+    setHover(tableUnder(e.clientX, e.clientY));                  // feedback : table cible surlignée
+  });
+  svg.addEventListener("pointerup", e=>{
+    if(!dragGuest) return;
+    const tid = tableUnder(e.clientX, e.clientY);
+    const from = state.assignment[dragGuest];
+    let moved=false;
+    if(tid && tid!==from){
+      state.assignment[dragGuest] = tid;
+      if(state.unplaced) state.unplaced = state.unplaced.filter(id=>id!==dragGuest);
+      save(); moved=true;
+    }
+    if(dragGhost && dragGhost.remove) dragGhost.remove();
+    if(hoverTable && adjustCircle[hoverTable]) adjustCircle[hoverTable].classList.remove("adj-target");
+    if(dragLabel) dragLabel.removeAttribute("opacity");
+    const who = moved ? gName(byId(dragGuest)) : null; const dest = tid;
+    dragGhost=null; dragGuest=null; dragLabel=null; hoverTable=null;
+    svg.classList.remove("dragging");
+    render();
+    if(moved) toast(`${who} déplacé(e) vers ${dest}.`);
+  });
+})();
+
+document.getElementById("adjustBtn").addEventListener("click", ()=>{
+  if(!adjustMode){
+    if(!allSeated()){ toast("Placez d'abord tous les convives (À TABLE ! ou 🪑) avant d'ajuster."); return; }
+    adjustMode = true; view.zoom=1; view.rot=0;
+    document.getElementById("rotwrap").classList.remove("show");
+    document.querySelector(".zoomctl").style.display="none";
+    hideTablePanel();
+    render();
+  } else {
+    adjustMode = false;
+    document.querySelector(".zoomctl").style.display="";
+    render();
+    const over = displayTables().filter(t=>t.members.length>t.capacity);
+    if(over.length) toast(`${over.length} table(s) dépassent encore leur capacité.`);
+  }
+});
+
 /* ============ ZOOM / ROTATION DE LA ROUE ============ */
 function applyView(){
   const svg = document.getElementById("stage");
@@ -1222,6 +1407,7 @@ function setZoom(z){
 
 /* ============ INTERACTIONS STAGE ============ */
 document.getElementById("stage").addEventListener("click", e=>{
+  if(adjustMode) return;                       // en mode Ajuster : drag & drop uniquement
   const gEl = e.target.closest("[data-guest]");
   const lEl = e.target.closest("[data-link]");
   const tEl = e.target.closest("[data-table]");
@@ -1619,6 +1805,7 @@ document.getElementById("zoomReset").addEventListener("click", ()=>{
   view.zoom=1; view.rot=0; document.getElementById("rotSlider").value=0; render();
 });
 document.getElementById("stage").addEventListener("wheel", (e)=>{
+  if(adjustMode) return;
   e.preventDefault();
   setZoom(view.zoom * (e.deltaY<0 ? 1.12 : 1/1.12));
 }, { passive:false });
